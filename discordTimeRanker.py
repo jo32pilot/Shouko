@@ -62,13 +62,38 @@ async def settup(context):
 async def frequency(context, measurement, time):
     if not os.path.isfile(context.message.server.id + '.txt'):
         config = open(context.message.server.id + '.txt', 'w')
-        config.write('frequency=' + measurement + str(time) + ';')
+        config.write('frequency=' + measurement + str(time))
         config.close()
     else:
         server_id = context.message.server.id
         change_config(server_id + '.txt', server_id + '.txt.tmp', 'frequency'
                         , measurement + str(time))
-    
+
+#time will be in hours, decimals allowed
+
+@bot.command(name='ranktime', pass_context=True)
+async def rank_time(context, rank, time):
+    count = 0
+    for role in context.message.server.roles:
+        if role.name == rank:
+            count += 1
+            if(count > 1):
+                await bot.say('Cannot change rank time if multiple ranks have the '
+                        + 'same name.')
+                return
+    if count == 0:
+        await bot.say('Cannot find a rank with the name %s.' % rank)
+    elif not os.path.isfile(context.message.server.id + '.txt'):
+        config = open(context.message.server.id + '.txt', 'w')
+        config.write(rank + '=' + str(time))
+        config.close()
+    else:
+        server_id = context.message.server.id
+        change_config(server_id + '.txt', server_id + '.txt.tmp', rank
+                        , str(time))
+
+#create check for number of arguments, and time must be greater than ?
+#remember afks
 
 #Helper methods/classes/checks go below
 
@@ -78,11 +103,14 @@ def change_config(old_file, new_file, option, value):
     old_settings = old_config.read()
     try:
         new_settings = dict(pair.split('=') for pair in old_settings.split(';'))
+        new_settings[option] = value
     except ValueError as exception:
-        new_settings = {option:value}
-    new_settings[option] = value
-    for key, value in new_settings.items():
-        new_config.write(key + '=' + str(value) + ';')
+        new_settings = {option:value, other_key:other_value}
+    iterator = iter(new_settings)
+    first_key = next(iterator)
+    new_config.write(first_key + '=' + str(new_settings[first_key]))
+    for key in iterator:
+        new_config.write(';' + key + '=' + str(new_settings[key]))
     old_config.close()
     new_config.close()
     os.remove(old_file)
