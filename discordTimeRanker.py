@@ -17,10 +17,29 @@ logger.addHandler(handler)
 
 TOKEN = 'NDYyMzc5ODU0NjI5Njk5NTk0.DlDzOw.9WBANK1QKaK17-3dbS6_nde46QU'
 bot = Bot(command_prefix='~', case_insensitve=True)
+server_configs = dict()
 
 @bot.event
 async def on_ready():
+    for server in bot.servers:
+        await bot.on_server_join(server)
     await bot.change_presence(game=Game(name='by itself'))
+    logger.info(str(server_configs))
+
+@bot.event
+async def on_server_join(server):
+    if not os.path.isfile(server.id + '.txt'):
+        curr_config = open(server.id + '.txt', 'w+')
+        settings = dict()
+    elif os.stat(server.id + '.txt').st_size == 0:
+        server_configs.update({server.id: dict()})
+        return
+    else:
+        curr_config = open(server.id + '.txt', 'r')
+        readable = curr_config.read()
+        settings = dict(pair.split('=') for pair in readable.split(';'))
+    server_configs.update({server.id: settings})
+    curr_config.close()
 
 bot.remove_command('help')
 @bot.command(pass_context=True)
@@ -42,11 +61,13 @@ async def help(context):
 #use time.time, then, in for loop, set delay to check, time.time - initial time.time
 #update experience when someone wants to check
 #on start up, get all configs and store into dictionary. {server_id:{option:value}}
+#edge case, what if dictionary is there but text file isn't?
 
 @bot.command(pass_context=True)
 async def settup(context):
     if not os.path.isfile(context.message.server.id + '.txt'):
         config = open(context.message.server.id + '.txt', 'w')
+        server_configs.update({context.message.server.id: dict()})
     else:
         config = open(context.message.server.id + '.txt', 'r')
     embeder = Embed(title='Rank Settup', colour=16777215, type='rich')
@@ -60,14 +81,8 @@ async def settup(context):
 
 @bot.command(pass_context=True)
 async def frequency(context, measurement, time):
-    if not os.path.isfile(context.message.server.id + '.txt'):
-        config = open(context.message.server.id + '.txt', 'w')
-        config.write('frequency=' + measurement + str(time))
-        config.close()
-    else:
-        server_id = context.message.server.id
-        change_config(server_id + '.txt', server_id + '.txt.tmp', 'frequency'
-                        , measurement + str(time))
+    server_id = context.message.server.id
+    change_config(server_id, 'frequency', measurement + str(time))
 
 #time will be in hours, decimals allowed
 
@@ -83,38 +98,27 @@ async def rank_time(context, rank, time):
                 return
     if count == 0:
         await bot.say('Cannot find a rank with the name %s.' % rank)
-    elif not os.path.isfile(context.message.server.id + '.txt'):
-        config = open(context.message.server.id + '.txt', 'w')
-        config.write(rank + '=' + str(time))
-        config.close()
     else:
         server_id = context.message.server.id
-        change_config(server_id + '.txt', server_id + '.txt.tmp', rank
-                        , str(time))
+        change_config(server_id, rank, str(time))
 
 #create check for number of arguments, and time must be greater than ?
 #remember afks
 
 #Helper methods/classes/checks go below
 
-def change_config(old_file, new_file, option, value):
-    old_config = open(old_file, 'r')
-    new_config = open(new_file, 'w+')
-    old_settings = old_config.read()
-    try:
-        new_settings = dict(pair.split('=') for pair in old_settings.split(';'))
-        new_settings[option] = value
-    except ValueError as exception:
-        new_settings = {option:value, other_key:other_value}
-    iterator = iter(new_settings)
-    first_key = next(iterator)
-    new_config.write(first_key + '=' + str(new_settings[first_key]))
-    for key in iterator:
-        new_config.write(';' + key + '=' + str(new_settings[key]))
-    old_config.close()
-    new_config.close()
-    os.remove(old_file)
-    os.rename(new_file, old_file)
+#update dictionaries
 
+def change_config(server_id, option, value):
+    settings = server_configs[server_id]
+    settings[option] = value
+    new_config = open(server_id + '.txt', 'w+')
+    iterator = iter(settings)
+    first_key = next(iterator)
+    new_config.write(first_key + '=' + str(settings[first_key]))
+    for key in iterator:
+        new_config.write(';' + key + '=' + str(settings[key]))
+    new_config.close()
+    
 
 bot.run(TOKEN)
