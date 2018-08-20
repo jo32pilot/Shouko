@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os.path
+import json
 from discord import Game
 from discord import Embed
 from discord.ext.commands import Bot
@@ -15,9 +16,15 @@ handler.setFormatter(
         logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 logger.addHandler(handler)
 
-TOKEN = 'NDYyMzc5ODU0NjI5Njk5NTk0.DlDzOw.9WBANK1QKaK17-3dbS6_nde46QU'
+#------------SETTUP------------#
+
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
+bot.remove_command('help')
+with open('config.json', 'r') as file:
+    config = json.load(file)
+
+#------------EVENTS------------#
 
 @bot.event
 async def on_ready():
@@ -41,7 +48,8 @@ async def on_server_join(server):
     server_configs.update({server.id: settings})
     curr_config.close()
 
-bot.remove_command('help')
+#------------COMMANDS------------#
+
 @bot.command(pass_context=True)
 async def help(context):
     embeder = Embed(title='List of Commands', colour=26574, type='rich')
@@ -104,10 +112,9 @@ async def rank_time(context, rank, time):
 
 #create check for number of arguments, and time must be greater than ?
 #remember afks
+#------------CHECKS------------#
 
-#Helper methods/classes/checks go below
-
-#update dictionaries
+#------------HELPER METHODS------------#
 
 def change_config(server_id, option, value):
     settings = server_configs[server_id]
@@ -121,4 +128,4 @@ def change_config(server_id, option, value):
     new_config.close()
     
 
-bot.run(TOKEN)
+bot.run(config['token'])
