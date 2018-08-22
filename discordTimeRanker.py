@@ -1,7 +1,9 @@
+import json
+import time
 import asyncio
 import logging
 import os.path
-import json
+import threading
 from discord import Game
 from discord import Embed
 from discord.ext.commands import Bot
@@ -20,6 +22,7 @@ logger.addHandler(handler)
 
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
+global_member_times = dict()
 bot.remove_command('help')
 with open('config.json', 'r') as file:
     config = json.load(file)
@@ -35,18 +38,23 @@ async def on_ready():
 
 @bot.event
 async def on_server_join(server):
-    if not os.path.isfile(server.id + '.txt'):
-        curr_config = open(server.id + '.txt', 'w+')
-        settings = dict()
-    elif os.stat(server.id + '.txt').st_size == 0:
-        server_configs.update({server.id: dict()})
-        return
-    else:
-        curr_config = open(server.id + '.txt', 'r')
-        readable = curr_config.read()
-        settings = dict(pair.split('=') for pair in readable.split(';'))
-    server_configs.update({server.id: settings})
-    curr_config.close()
+    stats_start(server)
+    config_start(server)
+
+#if they set themselves to afk, not necessarily in afk channel, stop counting.
+#maybe want to account for mute and deafened
+
+@bot.event
+async def on_voice_state_update(before, after):
+    server_times = global_member_times[before.server.id]
+    member_time = server_times[before.id]
+    if before.voice.voice_channel not == None and member_time == 0:
+        server_times[before.id] = time.time()
+    elif before.voice.voice_channel == None:
+        #To implement later. create update function that takes one person
+        #then overload with no people. The one with no people will just call
+        #the function with the parameter and will also be the user command.
+        await before.update()
 
 #------------COMMANDS------------#
 
@@ -67,9 +75,6 @@ async def help(context):
     logger.debug(embeder.fields)
 
 #use time.time, then, in for loop, set delay to check, time.time - initial time.time
-#update experience when someone wants to check
-#on start up, get all configs and store into dictionary. {server_id:{option:value}}
-#edge case, what if dictionary is there but text file isn't?
 
 @bot.command(pass_context=True)
 async def settup(context):
@@ -111,10 +116,44 @@ async def rank_time(context, rank, time):
         change_config(server_id, rank, str(time))
 
 #create check for number of arguments, and time must be greater than ?
+#create checks for type of arguments.
+#restriction on amount of time.
 #remember afks
 #------------CHECKS------------#
 
 #------------HELPER METHODS------------#
+
+def stats_start(server):
+    if not os.path.isfile(server.id + 'stats.txt'):
+        curr_stats = open(server.id + 'stats.txt', 'w')
+        global_member_times.update({server.id:dict()})
+        for member in server.members:
+            global_member_times[server.id].update({member.id:0})
+    elif os.stat(server.id + 'stat.txt').st_size == 0:
+        global_member_times.update({server.id:dict()})
+        for member in server.members:
+            global_member_times[server.id].update({member.id:0})
+        return
+    else:
+        curr_stats = open(server.id + 'stats.txt', 'r')
+        readable = curr_stats.read()
+        member_times = dict(pair.split('=') for pair in readable.split(';'))
+        global_member_times.update({server.id:member_times})
+    curr_stats.close()
+
+def config_start(server):
+    if not os.path.isfile(server.id + '.txt'):
+        curr_config = open(server.id + '.txt', 'w+')
+        settings = dict()
+    elif os.stat(server.id + '.txt').st_size == 0:
+        server_configs.update({server.id: dict()})
+        return
+    else:
+        curr_config = open(server.id + '.txt', 'r')
+        readable = curr_config.read()
+        settings = dict(pair.split('=') for pair in readable.split(';'))
+    server_configs.update({server.id: settings})
+    curr_config.close()
 
 def change_config(server_id, option, value):
     settings = server_configs[server_id]
@@ -126,6 +165,15 @@ def change_config(server_id, option, value):
     for key in iterator:
         new_config.write(';' + key + '=' + str(settings[key]))
     new_config.close()
-    
+
+def convert_time(time):
+    measurement = time[0].lower()
+    value = int(time[1:])
+    if measurement == 'm':
+        return value * 60
+    elif measurement == 'h':
+        return value * 60 * 60
+    elif measurement == 'd':
+        return value + 24 * 60 * 60
 
 bot.run(config['token'])
