@@ -1,10 +1,12 @@
 import json
 import time
+import sched
 import asyncio
 import logging
 import os.path
 import threading
 from discord import Game
+from discord import utils
 from discord import Embed
 from discord.ext.commands import Bot
 
@@ -23,6 +25,9 @@ logger.addHandler(handler)
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
 global_member_times = dict()
+role_orders = dict()
+active_threads = []
+#active_threads prevents creation of threads due to muting and deafening events
 bot.remove_command('help')
 with open('config.json', 'r') as file:
     config = json.load(file)
@@ -40,21 +45,18 @@ async def on_ready():
 async def on_server_join(server):
     stats_start(server)
     config_start(server)
+    role_orders.update({server.id:get_roles_in_order(server)})
 
-#if they set themselves to afk, not necessarily in afk channel, stop counting.
-#maybe want to account for mute and deafened
+#let admins decide how long until thrown in afk.
 
 @bot.event
 async def on_voice_state_update(before, after):
-    server_times = global_member_times[before.server.id]
-    member_time = server_times[before.id]
-    if before.voice.voice_channel not == None and member_time == 0:
-        server_times[before.id] = time.time()
-    elif before.voice.voice_channel == None:
-        #To implement later. create update function that takes one person
-        #then overload with no people. The one with no people will just call
-        #the function with the parameter and will also be the user command.
-        await before.update()
+    if after.voice.voice_channel is not None:
+        if after.id not in active_threads:
+            active_threads.append(after.id)
+            TimeTracker(after.server, after).start()
+    elif after.voice.voice_channel is None:
+        active_threads.remove(before.id)
 
 #------------COMMANDS------------#
 
@@ -73,8 +75,6 @@ async def help(context):
     embeder.add_field(name='~update', value='Force update ranks.')
     await bot.send_message(context.message.channel, embed=embeder)
     logger.debug(embeder.fields)
-
-#use time.time, then, in for loop, set delay to check, time.time - initial time.time
 
 @bot.command(pass_context=True)
 async def settup(context):
@@ -113,7 +113,9 @@ async def rank_time(context, rank, time):
         await bot.say('Cannot find a rank with the name %s.' % rank)
     else:
         server_id = context.message.server.id
-        change_config(server_id, rank, str(time))
+        change_config(server_id, rank, 'h' + str(time))
+        role_orders.update({server_id:get_roles_in_order(context.message.server)})
+        
 
 #create check for number of arguments, and time must be greater than ?
 #create checks for type of arguments.
@@ -128,18 +130,25 @@ def stats_start(server):
         curr_stats = open(server.id + 'stats.txt', 'w')
         global_member_times.update({server.id:dict()})
         for member in server.members:
-            global_member_times[server.id].update({member.id:0})
-    elif os.stat(server.id + 'stat.txt').st_size == 0:
+            global_member_times[server.id].update({member.id:[0, -1]})
+    elif os.stat(server.id + 'stats.txt').st_size == 0:
         global_member_times.update({server.id:dict()})
         for member in server.members:
-            global_member_times[server.id].update({member.id:0})
+            global_member_times[server.id].update({member.id:[0, -1]})
         return
     else:
+        member_times = dict()
         curr_stats = open(server.id + 'stats.txt', 'r')
-        readable = curr_stats.read()
-        member_times = dict(pair.split('=') for pair in readable.split(';'))
+        readable = curr_stats.read().split(';')
+        for pair in readable:
+            member_id, time_and_rank = pair.split('=')
+            time_and_rank = time_and_rank.strip('[\n]')
+            time_and_rank = time_and_rank.split(', ')
+            member_times.update({member_id:time_and_rank})
         global_member_times.update({server.id:member_times})
     curr_stats.close()
+
+#the second element in the lists will be rank positions in the list, not name
 
 def config_start(server):
     if not os.path.isfile(server.id + '.txt'):
@@ -155,6 +164,7 @@ def config_start(server):
     server_configs.update({server.id: settings})
     curr_config.close()
 
+
 def change_config(server_id, option, value):
     settings = server_configs[server_id]
     settings[option] = value
@@ -168,12 +178,91 @@ def change_config(server_id, option, value):
 
 def convert_time(time):
     measurement = time[0].lower()
-    value = int(time[1:])
+    value = float(time[1:])
     if measurement == 'm':
-        return value * 60
+        return int(value * 60)
     elif measurement == 'h':
-        return value * 60 * 60
+        return int(value * 60 * 60)
     elif measurement == 'd':
-        return value + 24 * 60 * 60
+        return int(value + 24 * 60 * 60)
 
+def get_roles_in_order(server):
+    to_sort = dict()
+    for role in server.roles:
+        try:
+            to_sort.update({role.name:convert_time(
+                    server_configs[server.id][role.name])})
+        except KeyError as e:
+            continue
+    return sorted(to_sort, key=to_sort.get)
+
+#account for server admins manually asigning roles
+#if new roles added later, be sure to allow for update
+#allow admins to turn message feature off
+#sleep thread if too straining on cpu
+
+#------------THREADING CLASSES------------#
+
+class TimeTracker(threading.Thread):
+
+    def __init__(self, server, member):
+        super().__init__(daemon=True)
+        times = global_member_times[server.id]
+        self.server = server
+        self.member = member
+        self.member_time = times[member.id][0]
+        try:
+            self.next_rank = role_orders[server.id][times[member.id][1] + 1]
+            self.rank_time = convert_time(server_configs[server.id][self.next_rank])
+        except IndexError as e:
+            self.rank_time = None
+
+    def run(self):
+        now = time.time()
+        times = global_member_times[self.server.id]
+        rank_time = self.rank_time + now
+        while self.member.voice.voice_channel is not None:
+            global_member_times[self.server.id][self.member.id][0] = self.member_time + time.time() - now
+            if (self.rank_time is not None and 
+                    self.member_time + time.time() >= rank_time):
+                future = asyncio.run_coroutine_threadsafe(bot.replace_roles(self.member, utils.find(
+                                        lambda role: role.name == self.next_rank
+                                        , self.server.roles)), bot.loop)
+                future.result()
+                times[self.member.id][1] += 1
+                reciever = self.server.default_channel
+                #let server admins decide on the message? Placeholder.
+                fmt_tup = (self.member.nick, "to_format_later",
+                                self.next_rank)
+                message = ("Congratulations %s! You've spent a total of "
+                            + "in %s's voice channels and have therefore "
+                            + "earned the rank of %s! Go wild~") % fmt_tup
+                if reciever is not None and reciever.type == ChannelType.text:
+                    # await bot.send_message(reciever, message) TODO fix
+                else:
+                    #await bot.send_message(self.member, message) TODO fix
+                try:
+                    self.next_rank = role_orders[self.server.id][times[self.member.id][1] + 1]
+                    self.rank_time = server_configs[self.server.id][self.next_rank]
+                except IndexError as e:
+                    self.rank_time = None
+
+class PeriodicUpdater(threading.Thread):
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.stat_writer = sched.scheduler(time.time, time.sleep)
+
+    def run(self):
+        for server in bot.servers:
+            with open(server.id + 'stats.txt', 'w') as stats:
+                server_times = global_server_times[server.id]
+                iterator = iter(server_times)
+                first_key = next(iterator)
+                stats.write(first_key + '=' + str(server_times[first_key]))
+                for key in iterator:
+                    stats.write(';' + key + '=' + str(server_times[key]))
+        self.stat_writer.enter(60, 1, self.run)
+
+PeriodicUpdater().run()
 bot.run(config['token'])
