@@ -1,6 +1,5 @@
 import json
 import time
-import sched
 import asyncio
 import logging
 import os.path
@@ -27,6 +26,7 @@ server_configs = dict()
 global_member_times = dict()
 role_orders = dict()
 active_threads = []
+lock = threading.Lock()
 #active_threads prevents creation of threads due to muting and deafening events
 bot.remove_command('help')
 with open('config.json', 'r') as file:
@@ -84,18 +84,10 @@ async def settup(context):
     else:
         config = open(context.message.server.id + '.txt', 'r')
     embeder = Embed(title='Rank Settup', colour=16777215, type='rich')
-    embeder.add_field(name='~frequency m/h/d [amount]', value='How often '
-                        + 'ranks will automatically update.\nm/h/d denote ' 
-                        + 'how you want time to be measured.\nm - minutes\n'
-                        + 'h - hours\nd - days\n')
+
     await bot.send_message(context.message.channel, embed=embeder)
     config.close()
     logger.debug(embeder.fields)
-
-@bot.command(pass_context=True)
-async def frequency(context, measurement, time):
-    server_id = context.message.server.id
-    change_config(server_id, 'frequency', measurement + str(time))
 
 #time will be in hours, decimals allowed
 
@@ -111,9 +103,12 @@ async def rank_time(context, rank, time):
                 return
     if count == 0:
         await bot.say('Cannot find a rank with the name %s.' % rank)
+    if not is_pos_number(time):
+        await bot.say('The time field must be a number and positive')
+        return
     else:
         server_id = context.message.server.id
-        change_config(server_id, rank, 'h' + str(time))
+        change_config(server_id, rank, str(time))
         role_orders.update({server_id:get_roles_in_order(context.message.server)})
         
 
@@ -130,11 +125,11 @@ def stats_start(server):
         curr_stats = open(server.id + 'stats.txt', 'w')
         global_member_times.update({server.id:dict()})
         for member in server.members:
-            global_member_times[server.id].update({member.id:[0, -1]})
+            global_member_times[server.id].update({member.id:[0, 0]})
     elif os.stat(server.id + 'stats.txt').st_size == 0:
         global_member_times.update({server.id:dict()})
         for member in server.members:
-            global_member_times[server.id].update({member.id:[0, -1]})
+            global_member_times[server.id].update({member.id:[0, 0]})
         return
     else:
         member_times = dict()
@@ -144,6 +139,8 @@ def stats_start(server):
             member_id, time_and_rank = pair.split('=')
             time_and_rank = time_and_rank.strip('[\n]')
             time_and_rank = time_and_rank.split(', ')
+            time_and_rank[0] = int(time_and_rank[0])
+            time_and_rank[1] = int(time_and_rank[1])
             member_times.update({member_id:time_and_rank})
         global_member_times.update({server.id:member_times})
     curr_stats.close()
@@ -177,14 +174,8 @@ def change_config(server_id, option, value):
     new_config.close()
 
 def convert_time(time):
-    measurement = time[0].lower()
-    value = float(time[1:])
-    if measurement == 'm':
-        return int(value * 60)
-    elif measurement == 'h':
-        return int(value * 60 * 60)
-    elif measurement == 'd':
-        return int(value + 24 * 60 * 60)
+    value = float(time)
+    return int(value * 60 * 60)
 
 def get_roles_in_order(server):
     to_sort = dict()
@@ -196,10 +187,21 @@ def get_roles_in_order(server):
             continue
     return sorted(to_sort, key=to_sort.get)
 
-#account for server admins manually asigning roles
+def is_pos_number(time):
+    try:
+        number = float(time)
+    except ValueError as e:
+        return False
+    if number < 0:
+        return False
+    return True
+
+
+#account for server admins manually asigning roles (even by accident)
 #if new roles added later, be sure to allow for update
 #allow admins to turn message feature off
 #sleep thread if too straining on cpu
+#account for change in time while people are in channel
 
 #------------THREADING CLASSES------------#
 
@@ -212,7 +214,7 @@ class TimeTracker(threading.Thread):
         self.member = member
         self.member_time = times[member.id][0]
         try:
-            self.next_rank = role_orders[server.id][times[member.id][1] + 1]
+            self.next_rank = role_orders[server.id][times[member.id][1]]
             self.rank_time = convert_time(server_configs[server.id][self.next_rank])
         except IndexError as e:
             self.rank_time = None
@@ -222,12 +224,13 @@ class TimeTracker(threading.Thread):
         times = global_member_times[self.server.id]
         rank_time = self.rank_time + now
         while self.member.voice.voice_channel is not None:
-            global_member_times[self.server.id][self.member.id][0] = self.member_time + time.time() - now
+            times[self.member.id][0] = self.member_time + time.time() - now
             if (self.rank_time is not None and 
                     self.member_time + time.time() >= rank_time):
-                future = asyncio.run_coroutine_threadsafe(bot.replace_roles(self.member, utils.find(
-                                        lambda role: role.name == self.next_rank
-                                        , self.server.roles)), bot.loop)
+                future = asyncio.run_coroutine_threadsafe(
+                        bot.replace_roles(self.member, utils.find(
+                        lambda role: role.name == self.next_rank
+                        , self.server.roles)), bot.loop)
                 future.result()
                 times[self.member.id][1] += 1
                 reciever = self.server.default_channel
@@ -238,31 +241,37 @@ class TimeTracker(threading.Thread):
                             + "in %s's voice channels and have therefore "
                             + "earned the rank of %s! Go wild~") % fmt_tup
                 if reciever is not None and reciever.type == ChannelType.text:
-                    # await bot.send_message(reciever, message) TODO fix
+                    future = asyncio.run_coroutine_threadsafe(
+                            bot.send_message(reciever, message), bot.loop)
                 else:
-                    #await bot.send_message(self.member, message) TODO fix
+                    future = asyncio.run_coroutine_threadsafe(
+                            bot.send_message(self.member, message), bot.loop)
+                future.result()
                 try:
-                    self.next_rank = role_orders[self.server.id][times[self.member.id][1] + 1]
-                    self.rank_time = server_configs[self.server.id][self.next_rank]
+                    self.next_rank = role_orders[self.server.id][times[self.member.id][1]]
+                    self.rank_time = convert_time(server_configs[self.server.id][self.next_rank])
+                    rank_time = self.rank_time + now
                 except IndexError as e:
                     self.rank_time = None
+
+
 
 class PeriodicUpdater(threading.Thread):
 
     def __init__(self):
         super().__init__(daemon=True)
-        self.stat_writer = sched.scheduler(time.time, time.sleep)
 
     def run(self):
-        for server in bot.servers:
-            with open(server.id + 'stats.txt', 'w') as stats:
-                server_times = global_server_times[server.id]
-                iterator = iter(server_times)
-                first_key = next(iterator)
-                stats.write(first_key + '=' + str(server_times[first_key]))
-                for key in iterator:
-                    stats.write(';' + key + '=' + str(server_times[key]))
-        self.stat_writer.enter(60, 1, self.run)
+        while True:
+            for server in bot.servers:
+                with open(server.id + 'stats.txt', 'w') as stats:
+                    server_times = global_member_times[server.id]
+                    iterator = iter(server_times)
+                    first_key = next(iterator)
+                    stats.write(first_key + '=' + str(server_times[first_key]))
+                    for key in iterator:
+                        stats.write(';' + key + '=' + str(server_times[key]))
+            time.sleep(config['sleep_time'])
 
-PeriodicUpdater().run()
+PeriodicUpdater().start()
 bot.run(config['token'])

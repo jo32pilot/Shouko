@@ -1,3 +1,4 @@
 *.log
 *.txt
 config.json
+test.py
