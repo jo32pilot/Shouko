@@ -27,10 +27,9 @@ bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
 global_member_times = dict()
 role_orders = dict()
+server_events = dict()
 active_threads = dict()
 #active_threads prevents creation of threads due to muting and deafening events
-stat_event = threading.Event()
-stat_event.set()
 bot.remove_command('help')
 with open('config.json', 'r') as file:
     config = json.load(file)
@@ -50,6 +49,9 @@ async def on_server_join(server):
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
+    stat_event = threading.Event()
+    stat_event.set()
+    server_events.update({server.id:stat_event})
 
 @bot.event
 async def on_voice_state_update(before, after):
@@ -140,7 +142,7 @@ async def rank_time(context, rank, time):
         # threads while updating ranks. (Note that rank position denotes
         # where each rank is in the time sorted list of roles.)
         #
-        # The initial block of function calls before the for loop loop settup 
+        # The initial block of function calls before the for loop settup 
         # for the updates in ranks. We initialize deep copies of the old 
         # configuration before the updates to be able to compare previous 
         # rank times and rank positions in the hierarchy against the new ones.
@@ -170,13 +172,7 @@ async def rank_time(context, rank, time):
         # Finally, we update the next_rank and rank_time fields in then user's
         # appropriate thread if such a thread exists. We then set the event
         # objects flag to true to signal all TimeTracker threads to continue.
-        #
-        # (I am aware that if one server enters this if statement, threads for
-        # users in every server will be blocked. However, in a data sensitive
-        # environment such as this, I would argue that prioritizing 
-        # the safety of each server's statistics is of greater importance
-        # than effeciency.)
-        stat_event.clear()
+        server_events[server_id].clear()
         old_server_configs = copy.deepcopy(server_configs[server_id])
         change_config(server_id, rank, str(time))
         previous_role_orders = copy.deepcopy(role_orders[server_id])
@@ -194,6 +190,7 @@ async def rank_time(context, rank, time):
             else:
                 curr_rank = None
                 curr_rank_time = -1
+                curr_rank_pos = -1
             if times[person][1] - 2 >= 0:
                 previous_rank = previous_role_orders[times[person][1] - 2]
                 previous_rank_time = convert_time(old_server_configs[previous_rank])
@@ -206,7 +203,8 @@ async def rank_time(context, rank, time):
                     await bot.replace_roles(person_obj, rank_obj)
                 except discord.errors.Forbidden as e:
                     logger.info(person_obj.name + ':' + person + 'Failed to update')
-                if times[person][1] < len(role_orders[server_id]):
+                if (times[person][1] < len(role_orders[server_id]) and 
+                        rank_before_new > curr_rank_pos):
                     times[person][1] += 1 #sets up next rank
             elif curr_rank is not None and curr_rank == rank:
                 if times[person][0] < new_time:
@@ -255,7 +253,7 @@ async def rank_time(context, rank, time):
                     active_threads[person].rank_time = None
             except (AttributeError, KeyError) as exc:
                 continue
-        stat_event.set()
+        server_events[server_id].set()
     else:
         # This code accounts for new ranks added to the list. It is fairly
         # similar to the code directly above, just with a lot stripped from it.
@@ -265,7 +263,7 @@ async def rank_time(context, rank, time):
         role_orders.update({server_id:get_roles_in_order(context.message.server)})
         rank_after_new = role_orders[server_id].index(rank)
         rank_obj = utils.find(lambda role: role.name == rank, context.message.server.roles)
-        stat_event.clear()
+        server_events[server_id].clear()
         for person in times.keys():  
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
@@ -295,7 +293,7 @@ async def rank_time(context, rank, time):
                     active_threads[person].rank_time = None
             except (AttributeError, KeyError) as exc:
                 continue
-        stat_event.set()
+        server_events[server_id].set()
 
 
 #------------CHECKS------------#
@@ -399,6 +397,7 @@ class TimeTracker(threading.Thread):
         self.server = server
         self.member = member
         self.member_time = times[member.id][0]
+        self.stat_event = server_events[server_id]
         try:
             self.next_rank = role_orders[server.id][times[member.id][1]]
             self.rank_time = convert_time(server_configs[server.id][self.next_rank])
@@ -411,8 +410,7 @@ class TimeTracker(threading.Thread):
         while (self.member.voice.voice_channel is not None 
                 and not self.member.voice.is_afk):
             times[self.member.id][0] = self.member_time + time.time() - now
-            stat_event.wait()
-            if (self.rank_time is not None and 
+            if (self.stat_event.is_set() and self.rank_time is not None and 
                     self.member_time + time.time() >= self.rank_time + now):
                 future = asyncio.run_coroutine_threadsafe(
                         bot.replace_roles(self.member, utils.find(
