@@ -113,14 +113,56 @@ async def rank_time(context, rank, time):
         await bot.say('The time field must be a number and positive')
         return
     if rank in role_orders[server_id]:
+        # Handles several edge cases for when a rank already has a specified
+        # time. An event object is set to prevent data corruption between
+        # threads while updating ranks. (Note that rank position denotes
+        # where each rank is in the time sorted list of roles.)
+        #
+        # The initial block of function calls before the for loop settup for
+        # the updates in ranks. We initialize deep copies of the old 
+        # configuration before the updates to be able to compare previous 
+        # rank times and rank positions in the hierarchy against the new ones.
+        # 
+        # For each person in the server, we set references to that person's
+        # current rank and previous ranks and the times it takes to get to
+        # them if such things exist. We can see that if a current rank does
+        # not exists, the current rank time is set to -1. This is to account
+        # for when the new time is set to 0. 
+        #
+        # The first case accounts for when the updated rank is higher than
+        # the users current rank but the user has already reached the new time
+        # milestone. We update the users rank to the new rank accordingly.
+        #
+        # The second case accounts for when the user is already at the rank
+        # being updated. This contains sub-cases. First, if the user's 
+        # accululated voice channel time is now less then the time needed
+        # to achieve the rank, we demote the user. Second, if the rank
+        # moves down the hierarchy by at lease 2 tiers, we give the user
+        # their previous rank.
+        #
+        # The third case accounts for all other scenarios. That being if
+        # the rank being updated moved above or below the user's in the
+        # hierarchy without altering the user's rank. In this case, all
+        # that must be done is an update to the user's rank position.
+        #
+        # Finally, we update the next_rank and rank_time fields in then user's
+        # appropriate thread if such a thread exists. We then set the event
+        # objects flag to true to signal all TimeTracker threads to continue.
+        #
+        # (I am aware that if one server enters this if statement, threads for
+        # users in every server will be blocked. However, in a data sensitive
+        # environment such as this, I would argue that prioritizing 
+        # the safety of each server's statistics is of greater importance
+        # than effeciency.)
         stat_event.clear()
+        times = global_member_times[context.message.server.id]
         old_server_configs = copy.deepcopy(server_configs[server_id])
-        change_config(server_id, rank, str(time))
         previous_role_orders = copy.deepcopy(role_orders[server_id])
+        change_config(server_id, rank, str(time))
         server_configs[server_id].update({rank:time})
         role_orders.update({server_id:get_roles_in_order(context.message.server)})
-        times = global_member_times[context.message.server.id]
         new_time = convert_time(time)
+        rank_before_new = previous_role_orders.index(rank)
         rank_after_new = role_orders[server_id].index(rank)
         rank_obj = utils.find(lambda role: role.name == rank, context.message.server.roles)
         for person in times:
@@ -129,9 +171,10 @@ async def rank_time(context, rank, time):
             if times[person][1] - 1 >= 0:
                 curr_rank = previous_role_orders[times[person][1] - 1]
                 curr_rank_time = convert_time(old_server_configs[curr_rank])
+                curr_rank_pos = role_orders[server_id].index(curr_rank)
             else:
                 curr_rank = None
-                curr_rank_time = 0
+                curr_rank_time = -1
             if times[person][1] - 2 >= 0:
                 previous_rank = previous_role_orders[times[person][1] - 2]
                 previous_rank_time = convert_time(old_server_configs[previous_rank])
@@ -139,62 +182,45 @@ async def rank_time(context, rank, time):
                 previous_rank = None
                 previous_rank_time = 0
             if curr_rank_time < new_time and times[person][0] >= new_time:
-                #add one so when new thread starts, it gets next rank's time
-                #new thread already handles if there isn't a next rank.
                 await bot.replace_roles(person_obj, rank_obj)
                 if times[person][1] < len(role_orders[server_id]):
-                    times[person][1] = rank_after_new + 1
-                try:
-                    try:
-                        new_rank = role_orders[server_id][times[person][1]]
-                        new_rank_time = convert_time(server_configs[server_id][new_rank])
-                        active_threads[person].next_rank = new_rank
-                        active_threads[person].rank_time = new_rank_time
-                    except IndexError as e:
-                        active_threads[person].rank_time = None
-                except (AttributeError, KeyError) as exc:
-                    continue
+                    times[person][1] = rank_after_new + 1 #sets up next rank
             elif curr_rank is not None and curr_rank == rank:
                 if times[person][0] < new_time:
                     if times[person][1] - 1 == 0:
-                        #if member has no rank after change
                         await bot.remove_roles(person_obj, rank_obj)
+                        curr_rank_pos = role_orders[server_id].index(curr_rank) - 1
                         times[person][1] = 0
-                        new_rank = role_orders[server_id][0]
-                        new_rank_time = convert_time(server_configs[server_id][new_rank])
-                        try:
-                            active_threads[person].next_rank = new_rank
-                            acitve_threads[person].rank_time = new_rank_time
-                        except (AttributeError, KeyError) as e:
-                            continue
                     elif times[person][1] - 1 > 0:
                         previous_role = utils.find(lambda role: previous_rank 
                                                     == role.name, context.message.server.roles)
                         await bot.replace_roles(person_obj, previous_role)
                         times[person][1] -= 1
-                        new_rank = role_orders[server_id][times[person][1]]
-                        new_rank_time = convert_time(server_configs[server_id][new_rank])
-                        try:
-                            active_threads[person].next_rank = new_rank
-                            active_threads[person].rank_time = new_rank_time
-                        except (AttributeError, KeyError) as e:
-                            continue
                 elif times[person][0] > new_time and previous_rank_time > new_time:
                     previous_role = utils.find(lambda role: previous_rank
                                                 == role.name, context.message.server.roles)
                     await bot.replace_roles(person_obj, previous_role)
                     if times[person][1] < len(role_orders[server_id]):
                         times[person][1] += 1
-                    try:
-                        try:
-                            new_rank = role_orders[server_id][times[person][1]]
-                            new_rank_time = convert_time(server_configs[server_id][new_rank])
-                            active_threads[person].next_rank = new_rank
-                            active_threads[person].rank_time = new_rank_time
-                        except IndexError as e:
-                            active_threads[person].rank_time = None
-                    except (AttributeError, KeyError) as exc:
-                        continue
+            else:
+                if (times[person][1] <= len(role_orders[server_id]) and 
+                        times[person][1] > 0 and rank_before_new <= curr_rank_pos and
+                        rank_after_new > curr_rank_pos):
+                    times[person][1] -= 1
+                elif (times[person][1] < len(role_orders[server_id]) and
+                        times[person][1] >= 0 and curr_rank is not None and
+                        rank_before_new > curr_rank_pos and rank_after_new <= curr_rank_pos):
+                    times[person][1] += 1
+            try:
+                try:
+                    new_rank = role_orders[server_id][times[person][1]]
+                    new_rank_time = convert_time(server_configs[server_id][new_rank])
+                    active_threads[person].next_rank = new_rank
+                    active_threads[person].rank_time = new_rank_time
+                except IndexError as e:
+                    active_threads[person].rank_time = None
+            except (AttributeError, KeyError) as exc:
+                continue
         stat_event.set()
     else:
         change_config(server_id, rank, str(time))
@@ -264,7 +290,7 @@ def convert_time(time):
     value = float(time)
     return int(value * 60 * 60)
 
-#returns a list of rank names sorted by their time
+"""returns a list of rank names sorted by their time"""
 def get_roles_in_order(server):
     to_sort = dict()
     for role in server.roles:
@@ -293,10 +319,9 @@ def update_stats(server):
         for key in iterator:
             stats.write(';' + key + '=' + str(server_times[key]))
 
-#account for server admins manually asigning roles (even by accident)
+#account for server admins manually asigning roles
 #if new roles added later, be sure to allow for update on_role_update()
 #allow admins to turn message feature off
-#account for change in time while people are in channel
 
 #------------THREADING CLASSES------------#
 
