@@ -87,14 +87,16 @@ async def on_server_role_create(role):
                 + 'said rank may cause the ranking system to fail. '
                 + 'If such issues do surface, please follow these steps:\n\n'
                 + '1: Remove the duplicate role from the server.\n2: Use the '
-                + 'ranktime command to readd the desired rank and time.\n3: '
+                + 'ranktime command to re-add the desired rank and time.\n3: '
                 + 'Use the ~cleanslate command to reset member ranks.\n\n'
                 + 'Be assured that all accumulated voice channel times for '
                 + 'each member will be preserved and rejoining a voice channel '
-                + 'will return everyone\'s deserved ranks.'
-                + '\n\nIf you don\'t want to recieve '
-                + 'any of these messages directly, settup a default channel '
-                + 'in you server and I\'ll send these over there!'))
+                + 'will return everyone\'s deserved ranks.'))
+        if reciever is not role.server.default_channel:
+            await bot.send_message(reciever, content=(
+                    + '\nIf you don\'t want to recieve '
+                    + 'any of these messages directly, settup a default channel '
+                    + 'in you server and I\'ll send these over there!'))
 
 @bot.event
 async def on_server_role_delete(role):
@@ -114,6 +116,7 @@ async def on_server_role_delete(role):
     for person in (set(times.keys()) - set(server_wl[server_id])):
         person_obj = utils.find(lambda member: member.id == person,
                                 role.server.members)
+        given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
         if times[person][1] - 1 >= 0:
             curr_rank = previous_role_orders[times[person][1] - 1]
             curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -129,7 +132,7 @@ async def on_server_role_delete(role):
         if curr_rank is not None and curr_rank == role.name:
             try:
                 await bot.replace_roles(person_obj, utils.find(lambda prev_obj: (
-                                    prev_obj.name == previous_rank), role.server.roles))
+                                    prev_obj.name == previous_rank), role.server.roles), *given_roles)
             except (discord.errors.Forbidden, AttributeError) as e:
                 logger.info(person_obj.name + ':' + person + ' : Exception Occured')
             times[person][1] -= 1
@@ -155,20 +158,50 @@ async def on_server_role_delete(role):
 # 2: Would get called even if a member ranked up normally.
 
 #------------COMMANDS------------#
-
 @bot.command(pass_context=True)
 async def help(context):
     embeder = Embed(title='List of Commands', colour=26574, type='rich')
-    embeder.add_field(name='~settup', value='Displays ' 
-                        + 'settup for ranks and commands to change them')
-    embeder.add_field(name='~whitelist [discord_username#XXXX]', value='Adds '
+    embeder.add_field(name='```~settup```', value='Displays ' 
+                        + 'your server\s ranking settup')
+    embeder.add_field(name='```~whitelist [discord_username#XXXX]```', value='Adds '
                         + 'people to the whitelist. People on the whitelist '
-                        + 'are not ranked by time. Typing "~whitelist" by '
-                        + 'itself lists people on the list.')
-    embeder.add_field(name='~unwhitelist [discord_username#XXXX]', value='Removes '
-                        + 'people from the whitelist. People removed will have '
-                        + 'their ranks set to the lowest level.')
-    embeder.add_field(name='~update', value='Force update ranks.')
+                        + 'are not ranked by time but still have their time '
+                        + 'tracked. Names are case sensitive.'
+                        + '\nExample usage: ```~whitelist Shouko Nishimiya#1234```')
+    embeder.add_field(name='```~unwhitelist [discord_username#XXXX]```', value='Removes '
+                        + 'people from the whitelist. People removed will '
+                        + 'be given back their deserved ranks upon rejoining a '
+                        + 'non-afk voice channel if not immediately. Names are '
+                        + 'case sensitive.\n'
+                        + 'Example usage: ```~whitelist Shouko Nishimiya#1234```')
+    embeder.add_field(name='~whitelist_all', value='Adds everyone on the server '
+                        + 'to the whitelist.')
+    embeder.add_field(name='```~unwhitelist_all```', value='Clears the whitelist.')
+    embeder.add_field(name='```~cleanslate```', value='Resets underlying user rank '
+                        + 'values. Use this to fix any issues that may occur. '
+                        + 'Be assured that all accumulated voice channel times '
+                        + 'are kept. All this means is that users have to rejoin '
+                        + 'a non-afk voice channel to regain their appropriate rank.')
+    embeder.add_field(name='```~ranktime [role_name] [ddd:hh:ss]```', value='Sets time '
+                        + 'milestone for [role_name]. Members who have spent '
+                        + '[ddd:hh:ss] will have their current role replaced '
+                        + 'with [role_name]. Members will retain all roles that '
+                        + 'do not have times associated with them. Changing '
+                        + 'or adding a new rank time, or deleting a role, '
+                        + 'will reconfigure all server members\' roles to meet '
+                        + 'the new standards. Inputing 000:00:00 will only assign '
+                        + 'the stated rank to new users once they have joined a '
+                        + 'voice channel. [role_name] must exists as a '
+                        + 'role in your Discord server. I advise removing any '
+                        + 'roles with the same names as that may break the '
+                        + 'functionality of the bot for this server. If such '
+                        + 'issues do surface, please follow these steps:\n\n'
+                        + '1: Remove the duplicate role from the server.\n2: Use the '
+                        + '~ranktime command to re-add the desired rank and time.\n3: '
+                        + 'Use the ```~cleanslate``` command to reset member ranks. '
+                        + '(See ```~cleanslate``` above for more info.)\nd: days\nh: hours'
+                        + '\ns: seconds\nRank names are case sensitive.'
+                        + '\n\n Example usage: ```~ranktime A Cool Role 002:06:34```')
     await bot.send_message(context.message.channel, embed=embeder)
     logger.debug(embeder.fields)
 
@@ -192,14 +225,14 @@ async def whitelist(context, *name):
     if to_list is None:
         await bot.say('Sorry! I can\'t find this person. '
                 + 'Remember that the format for this command is \n\n'
-                + '~whitelist [discord_username#XXXX]\n\n Example '
-                + 'usage: ~whitelist Shouko Nishimiya#1234')
+                + '~whitelist [discord_username#XXXX] (Names are case sensitive)'
+                + '\n\nExample usage: ~whitelist Shouko Nishimiya#1234')
     elif to_list.id in server_wl[server.id]:
         await bot.say('Member is already on the whitelist.')
     else:
         server_wl[server.id].append(to_list.id)
         write_wl(server, to_list.id)
-        await bot.say('Whitelist successful.')
+        await bot.say('Whitelist successful!')
 
 @bot.command(pass_context=True)
 async def unwhitelist(context, *name):
@@ -209,8 +242,8 @@ async def unwhitelist(context, *name):
     if to_list is None:
         await bot.say('Sorry! I can\'t find this person. '
                 + 'Remember that the format for this command is\n\n'
-                + '~unwhitelist [discord_username#XXX]\n\n Example '
-                + 'usage: ~unwhitelist Shouko Nishimiya#1234')
+                + '~unwhitelist [discord_username#XXX] (Names are case sensitive)'
+                + '\n\n Example usage: ~unwhitelist Shouko Nishimiya#1234')
     elif to_list.id not in server_wl[server.id]:
         await bot.say('Member is already not on the whitelist.')
     elif to_list.id in server_wl[server.id]:
@@ -226,9 +259,6 @@ async def unwhitelist(context, *name):
                 active_threads[server.id][to_list.id].rank_time = None
         except (AttributeError, KeyError) as exc:
             pass
-        await bot.say('Member has been removed from the whitelist. Rank '
-                        + 'should be given back after rejoining a voice '
-                        + 'channel if not already returned.')
         with open(server.id + 'wl.txt', 'w+') as wl_file:
             try:
                 wl_file.write(server_wl[server.id][0])
@@ -236,6 +266,9 @@ async def unwhitelist(context, *name):
                     wl_file.write(';' + person)
             except IndexError as e:
                 return
+        await bot.say('Member has been removed from the whitelist! Rank '
+                        + 'should be given back after rejoining a voice '
+                        + 'channel if not already returned.')
 
 @bot.command(pass_context=True)
 async def whitelist_all(context):
@@ -249,7 +282,9 @@ async def whitelist_all(context):
             for person in server_wl[server.id][1:]:
                 wl_write.write(';' + person)
         except IndexError as e:
+            await bot.say('Done!')
             return
+    await bot.say('Done!')
 
 @bot.command(pass_context=True)
 async def unwhitelist_all(context):
@@ -269,26 +304,27 @@ async def unwhitelist_all(context):
         except (AttributeError, KeyError) as exc:
             pass
     open(server.id + 'wl.txt' , 'w').close()
+    await bot.say('Done!')
 
 @bot.command(name='cleanslate', pass_context=True)
 async def clean_slate(context):
     times = global_member_times[context.message.server.id]
     for person in times:
         times[person][1] = 0
+    await bot.say('Done!')
 
-#notify of case sensitivity for names
-#give examples for command usage
-#notify after each change
-#make sure to allow for roles not in ranktimes to be given back
+#leaderboard
 #if they have a default channel, get rid of last part of message
 #if bot kicked from server stop user threads
 #tell people if they're missing permissions
 #create check for number of arguments, and time must be greater than ?
 #create checks for type of arguments.
 #allow admins to turn message feature off
-#TODO reformat time, ddd:hh:ss
 @bot.command(name='ranktime', pass_context=True)
-async def rank_time(context, rank, time):
+async def rank_time(context, *args):
+    now = time.time()
+    rank = ' '.join(args[:-1])
+    time = args[-1]
     server_id = context.message.server.id
     times = global_member_times[server_id]
     count = 0
@@ -302,15 +338,16 @@ async def rank_time(context, rank, time):
     if count == 0:
         await bot.say('Cannot find a rank with the name %s.' % rank)
         return
-    if not is_pos_number(time):
-        await bot.say('The time field must be a number and positive')
-        return
     for a_rank in role_orders[server_id]:
         if float(server_configs[server_id][a_rank]) == float(time):
             await bot.say('Sorry, we do not support ranks having the same times '
                             + 'at this moment.')
             return
     new_time = convert_time(time)
+    if new_time == None:
+        await bot.say('The formatting of your time argument is incorrect.\n' 
+                        + 'Usage: ```~ranktime [role_name] [ddd:hh:ss]```\n'
+                        + 'Example: ```~ranktime A Cool Role 002:06:34```')
     if rank in role_orders[server_id]:
         # Handles several edge cases for when a rank already has a specified
         # time. An event object is set to prevent data corruption between
@@ -358,9 +395,10 @@ async def rank_time(context, rank, time):
         rank_after_new = role_orders[server_id].index(rank)
         rank_before_new = previous_role_orders.index(rank) 
         rank_obj = utils.find(lambda role: role.name == rank, context.message.server.roles)
-        for person in (set(times.keys()) - set(server_wl[server_id])):
+        for person in (set(times.keys()) - set(server_wl[server_id])): # <-- super ineffecient
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
+            given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
             if times[person][1] - 1 >= 0:
                 curr_rank = previous_role_orders[times[person][1] - 1]
                 curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -378,7 +416,7 @@ async def rank_time(context, rank, time):
             if  (curr_rank_time < new_time and times[person][0] >= new_time 
                     and curr_rank != rank):
                 try:
-                    await bot.replace_roles(person_obj, rank_obj)
+                    await bot.replace_roles(person_obj, rank_obj, *given_roles)
                 except discord.errors.Forbidden as e:
                     logger.info(person_obj.name + ':' + person + 'Failed to update')
                 if (times[person][1] < len(role_orders[server_id]) and 
@@ -388,7 +426,7 @@ async def rank_time(context, rank, time):
                 if times[person][0] < new_time:
                     if times[person][1] - 1 == 0:
                         try:
-                            await bot.remove_roles(person_obj, rank_obj)
+                            await bot.replace_roles(person_obj, *given_roles)
                         except discord.errors.Forbidden as e:
                             logger.info(person_obj.name + ':' + person + 'Failed to update')
                             continue
@@ -396,7 +434,7 @@ async def rank_time(context, rank, time):
                         previous_role = utils.find(lambda role: previous_rank 
                                                     == role.name, context.message.server.roles)
                         try:
-                            await bot.replace_roles(person_obj, previous_role)
+                            await bot.replace_roles(person_obj, previous_role, *given_roles)
                         except discord.errors.Forbidden as e:
                             logger.info(person_obj.name + ':' + person + 'Failed to update')
                             continue
@@ -405,7 +443,7 @@ async def rank_time(context, rank, time):
                     previous_role = utils.find(lambda role: previous_rank
                                                 == role.name, context.message.server.roles)
                     try:
-                        await bot.replace_roles(person_obj, previous_role)
+                        await bot.replace_roles(person_obj, previous_role, *given_roles)
                     except discord.errors.Forbidden as e:
                         logger.info(person_obj.name + ':' + person + 'Failed to update')
                         continue
@@ -446,6 +484,7 @@ async def rank_time(context, rank, time):
         for person in (set(times.keys()) - set(server_wl[server_id])):
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
+            given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
             if times[person][1] - 1 >= 0:
                 curr_rank = previous_role_orders[times[person][1] - 1]
                 curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -455,7 +494,7 @@ async def rank_time(context, rank, time):
                 curr_rank_time = -1
             if curr_rank_time < new_time and times[person][0] >= new_time:
                 try:
-                    await bot.replace_roles(person_obj, rank_obj)
+                    await bot.replace_roles(person_obj, rank_obj, *given_roles)
                 except discord.errors.Forbidden as e:
                     logger.info(person_obj.name + ':' + person + 'Failed to update')
                 if times[person][1] < len(role_orders[server_id]):
@@ -473,9 +512,8 @@ async def rank_time(context, rank, time):
             except (AttributeError, KeyError) as exc:
                 continue
         server_events[server_id].set()
-
-
-#------------CHECKS------------#
+        await bot.say('Done!')
+        logger.info(time.time() - now)
 
 #------------HELPER METHODS------------#
 
@@ -563,8 +601,17 @@ def delete_config(server_id, option):
     new_config.close()
 
 def convert_time(time):
-    value = float(time)
-    return int(value * 60 * 60)
+    try:
+        days, hours, seconds = time.split(':')
+        days = int(days) * 24 * 60 * 60
+        hours = int(hours) * 60 * 60
+        seconds = int(seconds)
+        final_time = days + hours + seconds
+        if final_time < 0:
+            return None
+        return final_time
+    except ValueError as e:
+        return None
 
 """returns a list of rank names sorted by their time"""
 def get_roles_in_order(server):
@@ -576,15 +623,6 @@ def get_roles_in_order(server):
         except KeyError as e:
             continue
     return sorted(to_sort, key=to_sort.get)
-
-def is_pos_number(time):
-    try:
-        number = float(time)
-    except ValueError as e:
-        return False
-    if number < 0:
-        return False
-    return True
 
 def update_stats(server):
     with open(server.id + 'stats.txt', 'w') as stats:
@@ -647,19 +685,19 @@ class TimeTracker(threading.Thread):
             if (self.member.id not in server_wl[self.server.id] and 
                     self.rank_time is not None and 
                     self.member_time + time.time() >= self.rank_time + now):
+                given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
                 future = asyncio.run_coroutine_threadsafe(
                         bot.replace_roles(self.member, utils.find(
                         lambda role: role.name == self.next_rank
-                        , self.server.roles)), bot.loop)
+                        , self.server.roles), *given_roles), bot.loop)
                 future.result()
                 times[self.member.id][1] += 1
                 reciever = self.server.default_channel
-                #let server admins decide on the message? Placeholder.
-                fmt_tup = (self.member.nick, "to_format_later",
+                fmt_tup = (self.member.mention, "to_format_later",
                                 self.next_rank)
                 message = ("Congratulations %s! You've spent a total of "
                             + "in %s's voice channels and have therefore "
-                            + "earned the rank of %s! Go wild~") % fmt_tup
+                            + "earned the rank of %s! ") % fmt_tup
                 if reciever is not None and reciever.type == ChannelType.text:
                     future = asyncio.run_coroutine_threadsafe(
                             bot.send_message(reciever, message), bot.loop)
