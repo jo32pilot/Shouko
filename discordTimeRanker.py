@@ -61,7 +61,8 @@ async def on_server_join(server):
 async def on_voice_state_update(before, after):
     if after.voice.voice_channel is not None and not after.voice.is_afk:
         if after.id not in active_threads[after.server.id]:
-            new_thread = TimeTracker(after.server, after).start()
+            new_thread = TimeTracker(after.server, after)
+            new_thread.start()
             active_threads[after.server.id].update({after.id:new_thread})
     elif after.voice.voice_channel is None or after.voice.is_afk:
         try:
@@ -84,10 +85,14 @@ async def on_server_role_create(role):
                 + 'that I cannot guarantee that the correct version '
                 + 'will be assigned and that any reconfiuration of '
                 + 'said rank may cause the ranking system to fail. '
-                + 'If such issues do surface, please use the ~cleanslate '
-                + 'command to reset server configs. Be assured that '
-                + 'all accumulated voice channel times for each member '
-                + 'will be preserved.\n\nIf you don\'t want to recieve '
+                + 'If such issues do surface, please follow these steps:\n\n'
+                + '1: Remove the duplicate role from the server.\n2: Use the '
+                + 'ranktime command to readd the desired rank and time.\n3: '
+                + 'Use the ~cleanslate command to reset member ranks.\n\n'
+                + 'Be assured that all accumulated voice channel times for '
+                + 'each member will be preserved and rejoining a voice channel '
+                + 'will return everyone\'s deserved ranks.'
+                + '\n\nIf you don\'t want to recieve '
                 + 'any of these messages directly, settup a default channel '
                 + 'in you server and I\'ll send these over there!'))
 
@@ -144,37 +149,10 @@ async def on_server_role_delete(role):
             continue
     server_events[server_id].set()
 
-@bot.event
-async def on_member_update(before, after):
-    if after.id in server_wl[after.server.id]:
-        return
-    roles_before = set(before.roles)
-    roles_after = set(after.roles)
-    reciever = before.server.default_channel
-    if reciever is None or reciever.type != ChannelType.text:
-        reciever = before.server.owner
-    try: #after role removal
-        role_changed = roles_before - roles_after
-        (role_changed,) = role_changed
-        if role_changed.name in role_orders[after.server.id]:
-            await bot.replace_roles(after, *before.roles)
-            await bot.send_message(reciever, content=('Cannot remove a role '
-                    + 'that has a time milestone if member is not on the '
-                    + 'whitelist. Please use the ~whitelist command before '
-                    + 'manually updating a member\'s roles'))
-    except ValueError as e:
-        pass
-    try: #after adding a role
-        role_changed = roles_after - roles_before
-        (role_changed,) = role_changed
-        if role_changed.name in role_orders[after.server.id]:
-            await bot.replace_roles(after, *before.roles)
-            await bot.send_message(reciever, content=('Cannot add a role '
-                    + 'that has a time milestone if member is not on the '
-                    + 'whitelist. Please use the ~whitelist command before '
-                    + 'manually updating a member\'s roles.'))
-    except ValueError as e:
-        pass
+# cannot implement on_member_update event to account for manually assigned 
+# ranks because:
+# 1: Would recursively call itself I tried to fix ranks.
+# 2: Would get called even if a member ranked up normally.
 
 #------------COMMANDS------------#
 
@@ -234,10 +212,10 @@ async def unwhitelist(context, *name):
                 + '~unwhitelist [discord_username#XXX]\n\n Example '
                 + 'usage: ~unwhitelist Shouko Nishimiya#1234')
     elif to_list.id not in server_wl[server.id]:
-        print(to_list.id)
         await bot.say('Member is already not on the whitelist.')
     elif to_list.id in server_wl[server.id]:
         server_wl[server.id].remove(to_list.id)
+        times[to_list.id][1] = 0
         try:
             try:
                 new_rank = role_orders[server.id][times[to_list.id][1]]
@@ -245,13 +223,12 @@ async def unwhitelist(context, *name):
                 active_threads[server.id][to_list.id].next_rank = new_rank
                 active_threads[server.id][to_list.id].rank_time = new_rank_time
             except IndexError as e:
-                await bot.replace_roles(to_list, (utils.find(lambda role: 
-                                        role.name == role_orders[-1]), server.roles))
                 active_threads[server.id][to_list.id].rank_time = None
         except (AttributeError, KeyError) as exc:
             pass
         await bot.say('Member has been removed from the whitelist. Rank '
-                        + 'should return after rejoining a voice channel.')
+                        + 'should be given back after rejoining a voice '
+                        + 'channel if not already returned.')
         with open(server.id + 'wl.txt', 'w+') as wl_file:
             try:
                 wl_file.write(server_wl[server.id][0])
@@ -260,7 +237,46 @@ async def unwhitelist(context, *name):
             except IndexError as e:
                 return
 
-#on member update is recursive. fix it
+@bot.command(pass_context=True)
+async def whitelist_all(context):
+    server = context.message.server
+    for person in server:
+        if person not in server_wl[server.id]:
+            server_wl[server.id].append(person.id)
+    with open(server.id + 'wl.txt', 'w+') as wl_file:
+        try:
+            wl_file.write(server[server.id][0])
+            for person in server_wl[server.id][1:]:
+                wl_write.write(';' + person)
+        except IndexError as e:
+            return
+
+@bot.command(pass_context=True)
+async def unwhitelist_all(context):
+    server = context.message.server
+    times = global_member_times[server.id]
+    server_wl[server.id].clear()
+    for person in times:
+        times[person][1] = 0
+        try:
+            try: 
+                new_rank = role_orders[server.id][times[person][1]]
+                new_rank_time = convert_time(server_configs[server.id][new_rank])
+                active_threads[server.id][person].next_rank = new_rank
+                active_threads[server.id][person].rank_time = new_rank_time
+            except IndexError as e:
+                active_threads[server.id][person].rank_time = None
+        except (AttributeError, KeyError) as exc:
+            pass
+    open(server.id + 'wl.txt' , 'w').close()
+
+@bot.command(name='cleanslate', pass_context=True)
+async def clean_slate(context):
+    times = global_member_times[context.message.server.id]
+    for person in times:
+        times[person][1] = 0
+
+#notify of case sensitivity for names
 #give examples for command usage
 #notify after each change
 #make sure to allow for roles not in ranktimes to be given back
@@ -585,7 +601,11 @@ def find_user(server, name_list):
         last_name, discrim = name_list[-1].split('#')
         if re.match(discrim_pattern, discrim):
             username = ' '
-            username = username.join(name_list[:-1]) + ' ' + last_name
+            username = username.join(name_list[:-1])
+            if username == '':
+                username = last_name
+            else:
+                username = username + ' ' + last_name
             to_list = utils.find((lambda person: person.name == username and
                                     person.discriminator == discrim), server.members)
             if to_list is None:
