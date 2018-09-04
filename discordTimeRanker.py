@@ -10,6 +10,7 @@ import threading
 from discord import Game
 from discord import utils
 from discord import Embed
+from discord.ext import commands
 from discord.ext.commands import Bot
 
 #Sets up logging. Template taken from 
@@ -56,6 +57,23 @@ async def on_server_join(server):
     stat_event = threading.Event()
     stat_event.set()
     server_events.update({server.id:stat_event})
+
+@bot.event
+async def on_server_remove(server):
+    try:
+        del global_member_times[server.id]
+        del server_configs[server.id]
+        del role_orders[server.id]
+        del server_wl[server.id]
+        del server_events[server.id]
+    except (ValueError, KeyError) as e:
+        logger.error('Failed to remove server information from ' + server.id)
+    try:
+        for person in active_threads[server.id]:
+            active_threads[server.id][person].bot_in_server = False
+        del active_threads[server.id]
+    except KeyError as e:
+        return
 
 @bot.event
 async def on_voice_state_update(before, after):
@@ -151,82 +169,91 @@ async def on_server_role_delete(role):
         except (AttributeError, KeyError) as exc:
             continue
     server_events[server_id].set()
-
+"""
+@bot.event
+async def on_command_error(context, exception):
+    if isinstance(exception, commands.CommandNotFound):
+        await bot.send_message(context.message.channel, ('No such command '
+                + 'exists.'))
+"""
 # cannot implement on_member_update event to account for manually assigned 
 # ranks because:
 # 1: Would recursively call itself I tried to fix ranks.
 # 2: Would get called even if a member ranked up normally.
 
 #------------COMMANDS------------#
+
 @bot.command(pass_context=True)
-async def help(context):
-    embeder = Embed(title='List of Commands', colour=26574, type='rich')
-    embeder.add_field(name='```~settup```', value='Displays ' 
-                        + 'your server\s ranking settup')
-    embeder.add_field(name='```~whitelist [discord_username#XXXX]```', value='Adds '
-                        + 'people to the whitelist. People on the whitelist '
-                        + 'are not ranked by time but still have their time '
-                        + 'tracked. Names are case sensitive.'
-                        + '\nExample usage: ```~whitelist Shouko Nishimiya#1234```')
-    embeder.add_field(name='```~unwhitelist [discord_username#XXXX]```', value='Removes '
-                        + 'people from the whitelist. People removed will '
-                        + 'be given back their deserved ranks upon rejoining a '
-                        + 'non-afk voice channel if not immediately. Names are '
-                        + 'case sensitive.\n'
-                        + 'Example usage: ```~whitelist Shouko Nishimiya#1234```')
-    embeder.add_field(name='~whitelist_all', value='Adds everyone on the server '
-                        + 'to the whitelist.')
-    embeder.add_field(name='```~unwhitelist_all```', value='Clears the whitelist.')
-    embeder.add_field(name='```~cleanslate```', value='Resets underlying user rank '
-                        + 'values. Use this to fix any issues that may occur. '
-                        + 'Be assured that all accumulated voice channel times '
-                        + 'are kept. All this means is that users have to rejoin '
-                        + 'a non-afk voice channel to regain their appropriate rank.')
-    embeder.add_field(name='```~ranktime [role_name] [ddd:hh:ss]```', value='Sets time '
-                        + 'milestone for [role_name]. Members who have spent '
-                        + '[ddd:hh:ss] will have their current role replaced '
-                        + 'with [role_name]. Members will retain all roles that '
-                        + 'do not have times associated with them. Changing '
-                        + 'or adding a new rank time, or deleting a role, '
-                        + 'will reconfigure all server members\' roles to meet '
-                        + 'the new standards. Inputing 000:00:00 will only assign '
-                        + 'the stated rank to new users once they have joined a '
-                        + 'voice channel. [role_name] must exists as a '
-                        + 'role in your Discord server. I advise removing any '
-                        + 'roles with the same names as that may break the '
-                        + 'functionality of the bot for this server. If such '
-                        + 'issues do surface, please follow these steps:\n\n'
-                        + '1: Remove the duplicate role from the server.\n2: Use the '
-                        + '~ranktime command to re-add the desired rank and time.\n3: '
-                        + 'Use the ```~cleanslate``` command to reset member ranks. '
-                        + '(See ```~cleanslate``` above for more info.)\nd: days\nh: hours'
-                        + '\ns: seconds\nRank names are case sensitive.'
-                        + '\n\n Example usage: ```~ranktime A Cool Role 002:06:34```')
+async def help(context, *cmd):
+    embeder = Embed(colour=26575, type='rich')
+    try:
+        command = cmd[0]
+        embeder.add_field(name=config[command][0], value=config[command][1])
+    except (ValueError, KeyError, IndexError) as e:
+        embeder.title = 'Command List'
+        embeder.description = ('~help settup\n~help my_time\n~help leaderboard'
+                        + '\n~help whitelist\n'
+                        + '~help unwhitelist\n~help whitelist_all\n~'
+                        + 'help unwhitelist_all\n~help list_whitelist\n'
+                        + '~help cleanslate\n'
+                        + '~help ranktime\n~help toggle_messages')
     await bot.send_message(context.message.channel, embed=embeder)
-    logger.debug(embeder.fields)
 
 @bot.command(pass_context=True)
 async def settup(context):
-    if not os.path.isfile(context.message.server.id + '.txt'):
-        config = open(context.message.server.id + '.txt', 'w')
-        server_configs.update({context.message.server.id: dict()})
-    else:
-        config = open(context.message.server.id + '.txt', 'r')
-    embeder = Embed(title='Rank Settup', colour=16777215, type='rich')
-
+    server_id = context.message.server.id
+    to_send = ''
+    for role in role_orders[server_id][::-1]:
+        time = convert_from_seconds(server_configs[server_id][role])
+        to_send = (to_send + role + ': ' 
+                + '%s:%s:%s' % time + '\n')
+    embeder = Embed(title='Rank Settup', colour=3866383, type='rich', description=to_send)
     await bot.send_message(context.message.channel, embed=embeder)
-    config.close()
     logger.debug(embeder.fields)
 
 @bot.command(pass_context=True)
+async def my_time(context):
+    times = global_member_times[context.message.server.id]
+    time = convert_from_seconds(times[context.message.author.id][0])
+    await bot.say('%s Hours, %s Minutes, %s Seconds' % time)
+
+@bot.command(pass_context=True)
+async def leaderboard(context):
+    server = context.message.server
+    times = global_member_times[server.id]
+    embeder = Embed(title='Top 5 Server Member Times', colour=16755456, type='rich')
+    to_sort = dict()
+    for person in times:
+        to_sort.update({person:times[person][0]})
+    sorted_list = sorted(to_sort, key=to_sort.get)
+    thumbnail = None
+    top_five = -6
+    for person in sorted_list[:top_five:-1]:
+        try:
+            top_memb = utils.find(lambda member: member.id == person, server.members)
+            time_spent = convert_from_seconds(times[person][0])
+            if thumbnail is None:
+                thumbnail = top_memb.avatar_url
+            if thumbnail == '':
+                thumbnail = top_memb.dafault_avatar_url
+            embeder.add_field(name=top_memb.name, value=
+                    ('%s Hours, %s minutes, and %s seconds' % time_spent))
+        except (AttributeError, ValueError, KeyError) as e:
+            top_five -= 1
+    embeder.set_thumbnail(url=thumbnail)
+    await bot.send_message(context.message.channel, embed=embeder)
+        
+
+@bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
 async def whitelist(context, *name):
     server = context.message.server
     to_list = find_user(server, name)
     if to_list is None:
         await bot.say('Sorry! I can\'t find this person. '
                 + 'Remember that the format for this command is \n\n'
-                + '~whitelist [discord_username#XXXX] (Names are case sensitive)'
-                + '\n\nExample usage: ~whitelist Shouko Nishimiya#1234')
+                + '`~whitelist [discord_username#XXXX]` (Names are case sensitive)'
+                + '\n\nExample usage: ```~whitelist Shouko Nishimiya#1234```')
     elif to_list.id in server_wl[server.id]:
         await bot.say('Member is already on the whitelist.')
     else:
@@ -235,6 +262,7 @@ async def whitelist(context, *name):
         await bot.say('Whitelist successful!')
 
 @bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
 async def unwhitelist(context, *name):
     server = context.message.server
     times = global_member_times[server.id]
@@ -242,8 +270,8 @@ async def unwhitelist(context, *name):
     if to_list is None:
         await bot.say('Sorry! I can\'t find this person. '
                 + 'Remember that the format for this command is\n\n'
-                + '~unwhitelist [discord_username#XXX] (Names are case sensitive)'
-                + '\n\n Example usage: ~unwhitelist Shouko Nishimiya#1234')
+                + '`~unwhitelist [discord_username#XXXX]` (Names are case sensitive)'
+                + '\n\n Example usage: ```~unwhitelist Shouko Nishimiya#1234```')
     elif to_list.id not in server_wl[server.id]:
         await bot.say('Member is already not on the whitelist.')
     elif to_list.id in server_wl[server.id]:
@@ -271,6 +299,7 @@ async def unwhitelist(context, *name):
                         + 'channel if not already returned.')
 
 @bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
 async def whitelist_all(context):
     server = context.message.server
     for person in server:
@@ -287,6 +316,7 @@ async def whitelist_all(context):
     await bot.say('Done!')
 
 @bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
 async def unwhitelist_all(context):
     server = context.message.server
     times = global_member_times[server.id]
@@ -306,21 +336,26 @@ async def unwhitelist_all(context):
     open(server.id + 'wl.txt' , 'w').close()
     await bot.say('Done!')
 
+@bot.command(pass_context=True)
+async def list_whitelist(context):
+    server = context.message.server
+    to_send = ''
+    for person in server_wl[server.id]:
+        to_list = utils.find(lambda member: member.id == person, server.members)
+        to_send = to_send + to_list.name + '#' + to_list.discriminator + '\n'
+    embeder = Embed(title='Whitelist', colour=16777215, type='rich', description=to_send)
+    await bot.send_message(context.message.channel, embed=embeder)
+
 @bot.command(name='cleanslate', pass_context=True)
+@commands.has_permissions(manage_roles=True)
 async def clean_slate(context):
     times = global_member_times[context.message.server.id]
     for person in times:
         times[person][1] = 0
     await bot.say('Done!')
 
-#leaderboard
-#if they have a default channel, get rid of last part of message
-#if bot kicked from server stop user threads
-#tell people if they're missing permissions
-#create check for number of arguments, and time must be greater than ?
-#create checks for type of arguments.
-#allow admins to turn message feature off
 @bot.command(name='ranktime', pass_context=True)
+@commands.has_permissions(manage_roles=True)
 async def rank_time(context, *args):
     now = time.time()
     rank = ' '.join(args[:-1])
@@ -346,7 +381,7 @@ async def rank_time(context, *args):
     new_time = convert_time(time)
     if new_time == None:
         await bot.say('The formatting of your time argument is incorrect.\n' 
-                        + 'Usage: ```~ranktime [role_name] [ddd:hh:ss]```\n'
+                        + 'Usage: `~ranktime [role_name] [hhh:mm:ss]`\n'
                         + 'Example: ```~ranktime A Cool Role 002:06:34```')
     if rank in role_orders[server_id]:
         # Handles several edge cases for when a rank already has a specified
@@ -515,6 +550,13 @@ async def rank_time(context, *args):
         await bot.say('Done!')
         logger.info(time.time() - now)
 
+@bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
+async def toggle_messages(context):
+    server_id = context.message.server.id
+    change_config(server_id, "_send_messages324906", 
+            not server_configs[server_id]["_send_message324906"])
+
 #------------HELPER METHODS------------#
 
 def stats_start(server):
@@ -543,14 +585,15 @@ def stats_start(server):
         global_member_times.update({server.id:member_times})
     curr_stats.close()
 
-
+# the name _send_messages324906 is of no significance. just afraid that,
+# because this option and the ranks are stored in the same dictionary
+# and file, someone might have a role named "send message" so I wanted
+# to make the option name unique. Didn't want to make another file and
+# dictionary for open option
 def config_start(server):
     if not os.path.isfile(server.id + '.txt'):
         curr_config = open(server.id + '.txt', 'w+')
-        settings = dict()
-    elif os.stat(server.id + '.txt').st_size == 0:
-        server_configs.update({server.id:dict()})
-        return
+        settings = {"_send_messages324906":True}
     else:
         curr_config = open(server.id + '.txt', 'r')
         readable = curr_config.read()
@@ -602,11 +645,11 @@ def delete_config(server_id, option):
 
 def convert_time(time):
     try:
-        days, hours, seconds = time.split(':')
-        days = int(days) * 24 * 60 * 60
+        hours, minutes, seconds = time.split(':')
         hours = int(hours) * 60 * 60
+        minutes = int(minutes) * 60
         seconds = int(seconds)
-        final_time = days + hours + seconds
+        final_time = hours + minutes + seconds
         if final_time < 0:
             return None
         return final_time
@@ -623,6 +666,7 @@ def get_roles_in_order(server):
         except KeyError as e:
             continue
     return sorted(to_sort, key=to_sort.get)
+
 
 def update_stats(server):
     with open(server.id + 'stats.txt', 'w') as stats:
@@ -655,6 +699,12 @@ def find_user(server, name_list):
     except ValueError as e:
         return None
 
+def convert_from_seconds(time):
+    time = int(time)
+    seconds = (time % 60)
+    minutes = int(((time - seconds) / 60) % 60)
+    hours = int((time - (minutes * 60) - seconds) / 60 / 60)
+    return (str(hours), str(minutes), str(seconds))
 #------------THREADING CLASSES------------#
 
 class TimeTracker(threading.Thread):
@@ -665,6 +715,7 @@ class TimeTracker(threading.Thread):
         self.server = server
         self.member = member
         self.member_time = times[member.id][0]
+        self.bot_in_server = True
         self.stat_event = server_events[server.id]
         self.block_update = False
         try:
@@ -677,7 +728,7 @@ class TimeTracker(threading.Thread):
         now = time.time()
         times = global_member_times[self.server.id]
         while (self.member.voice.voice_channel is not None 
-                and not self.member.voice.is_afk):
+                and not self.member.voice.is_afk and self.bot_in_server):
             times[self.member.id][0] = self.member_time + time.time() - now
             self.block_update = True
             self.stat_event.wait()
@@ -685,20 +736,23 @@ class TimeTracker(threading.Thread):
             if (self.member.id not in server_wl[self.server.id] and 
                     self.rank_time is not None and 
                     self.member_time + time.time() >= self.rank_time + now):
-                given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
+                given_roles = [role for role in person_obj.roles if role not in role_orders[self.server.id]]
                 future = asyncio.run_coroutine_threadsafe(
                         bot.replace_roles(self.member, utils.find(
                         lambda role: role.name == self.next_rank
                         , self.server.roles), *given_roles), bot.loop)
                 future.result()
                 times[self.member.id][1] += 1
+                hours, minutes, seconds = convert_from_seconds(self.member_time + time.time())
                 reciever = self.server.default_channel
-                fmt_tup = (self.member.mention, "to_format_later",
+                fmt_tup = (self.member.mention, hours, minutes, seconds,
                                 self.next_rank)
                 message = ("Congratulations %s! You've spent a total of "
-                            + "in %s's voice channels and have therefore "
+                            + "in %s hours, %s minutes, and %s seconds in this "
+                            + "servers' voice channels and have therefore "
                             + "earned the rank of %s! ") % fmt_tup
-                if reciever is not None and reciever.type == ChannelType.text:
+                if (reciever is not None and reciever.type == ChannelType.text and
+                        server_configs[self.server.id]["_send_messages324906"]):
                     future = asyncio.run_coroutine_threadsafe(
                             bot.send_message(reciever, message), bot.loop)
                 else:
