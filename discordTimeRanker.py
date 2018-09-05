@@ -1,4 +1,5 @@
 import re
+import sys
 import json
 import time
 import copy
@@ -44,7 +45,7 @@ async def on_ready():
     for server in bot.servers:
         await bot.on_server_join(server)
     PeriodicUpdater().start()
-    await bot.change_presence(game=Game(name='by itself'))
+    await bot.change_presence(game=Game(name='on a ferris wheel.'))
     logger.info(str(server_configs))
 
 @bot.event
@@ -134,7 +135,7 @@ async def on_server_role_delete(role):
     for person in (set(times.keys()) - set(server_wl[server_id])):
         person_obj = utils.find(lambda member: member.id == person,
                                 role.server.members)
-        given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
+        given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
         if times[person][1] - 1 >= 0:
             curr_rank = previous_role_orders[times[person][1] - 1]
             curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -169,19 +170,17 @@ async def on_server_role_delete(role):
         except (AttributeError, KeyError) as exc:
             continue
     server_events[server_id].set()
-"""
-@bot.event
-async def on_command_error(context, exception):
-    if isinstance(exception, commands.CommandNotFound):
-        await bot.send_message(context.message.channel, ('No such command '
-                + 'exists.'))
-"""
+
 # cannot implement on_member_update event to account for manually assigned 
 # ranks because:
 # 1: Would recursively call itself I tried to fix ranks.
 # 2: Would get called even if a member ranked up normally.
 
+
+
 #------------COMMANDS------------#
+
+
 
 @bot.command(pass_context=True)
 async def help(context, *cmd):
@@ -195,8 +194,9 @@ async def help(context, *cmd):
                         + '\n~help whitelist\n'
                         + '~help unwhitelist\n~help whitelist_all\n~'
                         + 'help unwhitelist_all\n~help list_whitelist\n'
-                        + '~help cleanslate\n'
-                        + '~help ranktime\n~help toggle_messages')
+                        + '~help cleanslate\n~help ranktime\n'
+                        + '~help rm_ranktime\n~help toggle_messages'
+                        + '\n~github\n~donate')
     await bot.send_message(context.message.channel, embed=embeder)
 
 @bot.command(pass_context=True)
@@ -204,9 +204,8 @@ async def settup(context):
     server_id = context.message.server.id
     to_send = ''
     for role in role_orders[server_id][::-1]:
-        time = convert_from_seconds(server_configs[server_id][role])
         to_send = (to_send + role + ': ' 
-                + '%s:%s:%s' % time + '\n')
+                + server_configs[server_id][role] + '\n')
     embeder = Embed(title='Rank Settup', colour=3866383, type='rich', description=to_send)
     await bot.send_message(context.message.channel, embed=embeder)
     logger.debug(embeder.fields)
@@ -357,7 +356,6 @@ async def clean_slate(context):
 @bot.command(name='ranktime', pass_context=True)
 @commands.has_permissions(manage_roles=True)
 async def rank_time(context, *args):
-    now = time.time()
     rank = ' '.join(args[:-1])
     time = args[-1]
     server_id = context.message.server.id
@@ -371,10 +369,10 @@ async def rank_time(context, *args):
                                 + 'same name.')
                 return
     if count == 0:
-        await bot.say('Cannot find a rank with the name %s.' % rank)
+        await bot.say('Cannot find a role with the name %s.' % rank)
         return
     for a_rank in role_orders[server_id]:
-        if float(server_configs[server_id][a_rank]) == float(time):
+        if (server_configs[server_id][a_rank]) == time:
             await bot.say('Sorry, we do not support ranks having the same times '
                             + 'at this moment.')
             return
@@ -433,7 +431,10 @@ async def rank_time(context, *args):
         for person in (set(times.keys()) - set(server_wl[server_id])): # <-- super ineffecient
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
-            given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
+            try:
+                given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+            except AttributeError as e:
+                pass
             if times[person][1] - 1 >= 0:
                 curr_rank = previous_role_orders[times[person][1] - 1]
                 curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -519,7 +520,7 @@ async def rank_time(context, *args):
         for person in (set(times.keys()) - set(server_wl[server_id])):
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
-            given_roles = [role for role in person_obj.roles if role not in role_orders[server_id]]
+            given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
             if times[person][1] - 1 >= 0:
                 curr_rank = previous_role_orders[times[person][1] - 1]
                 curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -547,17 +548,43 @@ async def rank_time(context, *args):
             except (AttributeError, KeyError) as exc:
                 continue
         server_events[server_id].set()
+    await bot.say('Done!')
+
+@bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
+async def rm_ranktime(context, *args):
+    server = context.message.server
+    rank = ' '.join(args)
+    if rank not in role_orders[server.id]:
+        bot.say('Cannot find rank with the name %s.'
+                + 'Usage: `~ranktime [role_name] [hhh:mm:ss]`\n'
+                + 'Example: ```~ranktime A Cool Role 002:06:34```' % rank)
+    else:
+        await on_role_delete(lambda role: role.name == rank, context.message.server.roles)
         await bot.say('Done!')
-        logger.info(time.time() - now)
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
 async def toggle_messages(context):
     server_id = context.message.server.id
     change_config(server_id, "_send_messages324906", 
-            not server_configs[server_id]["_send_message324906"])
+            not bool(server_configs[server_id]["_send_message324906"]))
+
+@bot.command(pass_context=True)
+async def github(context):
+    embeder = Embed(colour=26575, type='rich', description=config['github_url'])
+    await bot.send_message(context.message.channel, embed=embeder)
+
+@bot.command(pass_context=True)
+async def donate(context):
+    embeder = Embed(colour=26575, type='rich', description=config['patreon'])
+    await bot.send_message(context.message.channel, embed=embeder)
+
+
 
 #------------HELPER METHODS------------#
+
+
 
 def stats_start(server):
     if not os.path.isfile(server.id + 'stats.txt'):
@@ -594,6 +621,7 @@ def config_start(server):
     if not os.path.isfile(server.id + '.txt'):
         curr_config = open(server.id + '.txt', 'w+')
         settings = {"_send_messages324906":True}
+        curr_config.write("_send_messages324906" + "=" + "True")
     else:
         curr_config = open(server.id + '.txt', 'r')
         readable = curr_config.read()
@@ -705,7 +733,12 @@ def convert_from_seconds(time):
     minutes = int(((time - seconds) / 60) % 60)
     hours = int((time - (minutes * 60) - seconds) / 60 / 60)
     return (str(hours), str(minutes), str(seconds))
+
+
+
 #------------THREADING CLASSES------------#
+
+
 
 class TimeTracker(threading.Thread):
 
@@ -736,14 +769,14 @@ class TimeTracker(threading.Thread):
             if (self.member.id not in server_wl[self.server.id] and 
                     self.rank_time is not None and 
                     self.member_time + time.time() >= self.rank_time + now):
-                given_roles = [role for role in person_obj.roles if role not in role_orders[self.server.id]]
+                given_roles = [role for role in self.member.roles if role.name not in role_orders[self.server.id]]
                 future = asyncio.run_coroutine_threadsafe(
                         bot.replace_roles(self.member, utils.find(
                         lambda role: role.name == self.next_rank
                         , self.server.roles), *given_roles), bot.loop)
                 future.result()
                 times[self.member.id][1] += 1
-                hours, minutes, seconds = convert_from_seconds(self.member_time + time.time())
+                hours, minutes, seconds = convert_from_seconds(times[self.member.id][0])
                 reciever = self.server.default_channel
                 fmt_tup = (self.member.mention, hours, minutes, seconds,
                                 self.next_rank)
@@ -752,7 +785,7 @@ class TimeTracker(threading.Thread):
                             + "servers' voice channels and have therefore "
                             + "earned the rank of %s! ") % fmt_tup
                 if (reciever is not None and reciever.type == ChannelType.text and
-                        server_configs[self.server.id]["_send_messages324906"]):
+                        bool(server_configs[self.server.id]["_send_messages324906"])):
                     future = asyncio.run_coroutine_threadsafe(
                             bot.send_message(reciever, message), bot.loop)
                 else:
