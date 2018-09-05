@@ -1,5 +1,5 @@
 # Shouko Bot
-![](https://data.whicdn.com/images/293013699/original.gif)
+![][https://data.whicdn.com/images/293013699/original.gif]
 Hi, I'm Shouko! I assign Discord roles based on how much time a member has spent
 in a voice channel. Yes, I am aware of the irony.
 
