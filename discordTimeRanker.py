@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os.path
 import discord
+import traceback
 import threading
 from discord import Game
 from discord import utils
@@ -171,6 +172,25 @@ async def on_server_role_delete(role):
             continue
     server_events[server_id].set()
 
+@bot.event
+async def on_command_error(error, context):
+    channel = context.message.channel
+    if isinstance(error, commands.CommandNotFound):
+        pass
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await bot.send_message(channel, "You didn't provide me enough arguments."
+                            + " Checkout out the ~help command and try again!")
+    elif isinstance(error, commands.CheckFailure):
+        await bot.send_message(channel, "You're missing role managing permissions!")
+    else:
+        embeder = Embed(type='rich', description="Sorry!, I ran into an error. "
+                        + "Try leaving a new issue comment over at "
+                        + "[my Github page](https://github.com/jo32pilot/Shouko/issues/new)"
+                        + " describing the situation. It would help a lot!")
+        await bot.send_message(channel, embed=embeder)
+        logger.error(context.message.content + '\n' + ''.join(traceback.format_exception(
+                        type(error), error, error.__traceback__)))
+
 # cannot implement on_member_update event to account for manually assigned 
 # ranks because:
 # 1: Would recursively call itself I tried to fix ranks.
@@ -195,8 +215,8 @@ async def help(context, *cmd):
                         + '~help unwhitelist\n~help whitelist_all\n~'
                         + 'help unwhitelist_all\n~help list_whitelist\n'
                         + '~help cleanslate\n~help ranktime\n'
-                        + '~help rm_ranktime\n~help toggle_messages'
-                        + '\n~github\n~donate')
+                        + '~help rm_ranktime\n~help rm_usertime'
+                        + '\n~help toggle_messages\n~github\n~donate')
     await bot.send_message(context.message.channel, embed=embeder)
 
 @bot.command(pass_context=True)
@@ -234,10 +254,12 @@ async def leaderboard(context):
             if thumbnail is None:
                 thumbnail = top_memb.avatar_url
             if thumbnail == '':
-                thumbnail = top_memb.dafault_avatar_url
+                thumbnail = top_memb.default_avatar_url
             embeder.add_field(name=top_memb.name, value=
-                    ('%s Hours, %s minutes, and %s seconds' % time_spent))
+                    ('%s Hours, %s minutes, and %s seconds' % time_spent),
+                    inline=False)
         except (AttributeError, ValueError, KeyError) as e:
+            print(str(e))
             top_five -= 1
     embeder.set_thumbnail(url=thumbnail)
     await bot.send_message(context.message.channel, embed=embeder)
@@ -356,6 +378,8 @@ async def clean_slate(context):
 @bot.command(name='ranktime', pass_context=True)
 @commands.has_permissions(manage_roles=True)
 async def rank_time(context, *args):
+    if len(args) < 1:
+        raise commands.MissingRequiredArgument()
     rank = ' '.join(args[:-1])
     time = args[-1]
     server_id = context.message.server.id
@@ -520,7 +544,10 @@ async def rank_time(context, *args):
         for person in (set(times.keys()) - set(server_wl[server_id])):
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
-            given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+            try:
+                given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+            except AttributeError as e:
+                pass
             if times[person][1] - 1 >= 0:
                 curr_rank = previous_role_orders[times[person][1] - 1]
                 curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -562,6 +589,30 @@ async def rm_ranktime(context, *args):
     else:
         await on_role_delete(lambda role: role.name == rank, context.message.server.roles)
         await bot.say('Done!')
+
+@bot.command(pass_context=True)
+@commands.has_permissions(manage_roles=True)
+async def rm_usertime(context, *args):
+    if len(args) < 1:
+        raise commands.MissingRequiredArgument()
+    server_id = context.message.server.id
+    user = find_user(context.message.server, args)
+    if user is None:
+        await bot.say("I can't find this person.")
+    else:
+        times = global_member_times[server_id]
+        given_roles = [role for role in user.roles if role.name not in role_orders[server_id]]
+        times[user.id][0] = 0
+        times[user.id][1] = 0
+        try:
+            next_rank = role_orders[server_id][0]
+            rank_time = server_configs[server_id][next_rank]
+            active_threads[server_id][user.id].next_rank = next_rank
+            active_threads[server_id][user.id].rank_time = rank_time
+        except (KeyError, ValueError, IndexError) as e:
+            pass
+        await bot.replace_roles(user, *given_roles)
+        await bot.say("Done!")
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
@@ -816,4 +867,4 @@ class PeriodicUpdater(threading.Thread):
                     logger.info('KeyError in PeriodicUpdater thread.')
             time.sleep(config['sleep_time'])
 
-bot.run(config['token'])
+bot.run(config['test_token'])
