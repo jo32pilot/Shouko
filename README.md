@@ -8,4 +8,4 @@ in a voice channel. Yes, I am aware of the irony.
 
 # Note
 If you noticed the hard coded key in the previous commits, don't worry. That
-key has since been depreciated and replaced.
+key has since been deprecated and replaced.

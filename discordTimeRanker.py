@@ -79,12 +79,14 @@ async def on_server_remove(server):
 
 @bot.event
 async def on_voice_state_update(before, after):
-    if after.voice.voice_channel is not None and not after.voice.is_afk:
+    if (after.voice.voice_channel is not None and not after.voice.is_afk
+            and not after.voice.deaf and not after.voice.self_deaf):
         if after.id not in active_threads[after.server.id]:
             new_thread = TimeTracker(after.server, after)
             new_thread.start()
             active_threads[after.server.id].update({after.id:new_thread})
-    elif after.voice.voice_channel is None or after.voice.is_afk:
+    elif (after.voice.voice_channel is None or after.voice.is_afk
+            or after.voice.deaf or after.voice.self_deaf):
         try:
             del active_threads[after.server.id][after.id]
         except KeyError as e:
@@ -811,7 +813,8 @@ class TimeTracker(threading.Thread):
     def run(self):
         now = time.time()
         times = global_member_times[self.server.id]
-        while (self.member.voice.voice_channel is not None 
+        while (not self.member.voice.deaf and not self.member.voice.self_deaf and 
+                self.member.voice.voice_channel is not None 
                 and not self.member.voice.is_afk and self.bot_in_server):
             times[self.member.id][0] = self.member_time + time.time() - now
             self.block_update = True
