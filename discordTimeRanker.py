@@ -46,11 +46,12 @@ async def on_ready():
     for server in bot.servers:
         await bot.on_server_join(server)
     PeriodicUpdater().start()
-    await bot.change_presence(game=Game(name='on a ferris wheel.'))
+    await bot.change_presence(game=Game(name='~help'))
     logger.info(str(server_configs))
 
 @bot.event
 async def on_server_join(server):
+    logger.info('Joining server' + server.name)
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
@@ -62,6 +63,7 @@ async def on_server_join(server):
 
 @bot.event
 async def on_server_remove(server):
+    logger.info('Leaving server:' + server.name)
     try:
         del global_member_times[server.id]
         del server_configs[server.id]
@@ -866,8 +868,9 @@ class PeriodicUpdater(threading.Thread):
             for server in bot.servers:
                 try:
                     update_stats(server)
-                except KeyError as e:
-                    logger.info('KeyError in PeriodicUpdater thread.')
+                except KeyError as error:
+                    logger.info(''.join(traceback.format_exception(
+                                type(error), error, error.__traceback__)))
             time.sleep(config['sleep_time'])
 
 bot.run(config['test_token'])
