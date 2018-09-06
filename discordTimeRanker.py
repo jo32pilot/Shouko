@@ -20,7 +20,7 @@ from discord.ext.commands import Bot
 logger = logging.getLogger('discord')
 logger.setLevel(logging.INFO)
 handler = logging.FileHandler(filename='discord.log'
-                            , encoding='ascii', mode='w')
+                            , encoding='utf-8', mode='w')
 handler.setFormatter(
         logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 logger.addHandler(handler)
@@ -45,13 +45,13 @@ with open('config.json', 'r') as file:
 async def on_ready():
     for server in bot.servers:
         await bot.on_server_join(server)
+        logger.info('Joining server ' + server.name)
     PeriodicUpdater().start()
-    await bot.change_presence(game=Game(name='~help'))
+    await bot.change_presence(game=Game(name='on a ferris wheel | ~help'))
     logger.info(str(server_configs))
 
 @bot.event
 async def on_server_join(server):
-    logger.info('Joining server' + server.name)
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
@@ -63,7 +63,7 @@ async def on_server_join(server):
 
 @bot.event
 async def on_server_remove(server):
-    logger.info('Leaving server:' + server.name)
+    logger.info('Leaving server ' + server.name)
     try:
         del global_member_times[server.id]
         del server_configs[server.id]
@@ -869,8 +869,10 @@ class PeriodicUpdater(threading.Thread):
                 try:
                     update_stats(server)
                 except KeyError as error:
-                    logger.info(''.join(traceback.format_exception(
+                    logger.info(server.name + ''.join(traceback.format_exception(
                                 type(error), error, error.__traceback__)))
+                    continue
             time.sleep(config['sleep_time'])
+        logging.shutdown()
 
 bot.run(config['test_token'])
