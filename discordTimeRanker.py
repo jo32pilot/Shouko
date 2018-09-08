@@ -34,24 +34,29 @@ role_orders = dict()
 server_wl = dict()
 server_events = dict()
 active_threads = dict()
-#active_threads prevents creation of threads due to muting and deafening events
 bot.remove_command('help')
 with open('config.json', 'r') as file:
     config = json.load(file)
 
 #------------EVENTS------------#
 
+# I realize that this is n^3 and really bad, but it only gets called 
+# whenever I start up the bot, which is rarely ever because the bot is
+# almost always on.
 @bot.event
 async def on_ready():
     for server in bot.servers:
         await bot.on_server_join(server)
-        logger.info('Joining server ' + server.name)
+        for channel in server.channels:
+            for voice_member in channel.voice_members:
+                await on_voice_state_update(voice_member, voice_member)
     PeriodicUpdater().start()
     await bot.change_presence(game=Game(name='on a ferris wheel | ~help'))
     logger.info(str(server_configs))
 
 @bot.event
 async def on_server_join(server):
+    logger.info('Joining server ' + server.name)
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
@@ -241,17 +246,25 @@ async def my_time(context):
     await bot.say('%s Hours, %s Minutes, %s Seconds' % time)
 
 @bot.command(pass_context=True)
-async def leaderboard(context):
+async def leaderboard(context, amount):
+    try:
+        int_amount = int(amount)
+    except ValueError as e:
+        await bot.say('A valid number must be entered.')
+        return
+    if int_amount < 1 or int_amount > 15:
+        await bot.say('Sorry! I only support numbers between 1 and 15.')
+        return
     server = context.message.server
     times = global_member_times[server.id]
-    embeder = Embed(title='Top 5 Server Member Times', colour=16755456, type='rich')
+    embeder = Embed(title=('Top %s Server Member Times' % amount), colour=16755456, type='rich')
     to_sort = dict()
     for person in times:
         to_sort.update({person:times[person][0]})
     sorted_list = sorted(to_sort, key=to_sort.get)
     thumbnail = None
-    top_five = -6
-    for person in sorted_list[:top_five:-1]:
+    top_x = (-1 * int_amount) - 1
+    for person in sorted_list[:top_x:-1]:
         try:
             top_memb = utils.find(lambda member: member.id == person, server.members)
             time_spent = convert_from_seconds(times[person][0])
@@ -264,7 +277,7 @@ async def leaderboard(context):
                     inline=False)
         except (AttributeError, ValueError, KeyError) as e:
             print(str(e))
-            top_five -= 1
+            top_x -= 1
     embeder.set_thumbnail(url=thumbnail)
     await bot.send_message(context.message.channel, embed=embeder)
         
