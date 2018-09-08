@@ -47,9 +47,6 @@ with open('config.json', 'r') as file:
 async def on_ready():
     for server in bot.servers:
         await bot.on_server_join(server)
-        for channel in server.channels:
-            for voice_member in channel.voice_members:
-                await on_voice_state_update(voice_member, voice_member)
     PeriodicUpdater().start()
     await bot.change_presence(game=Game(name='on a ferris wheel | ~help'))
     logger.info(str(server_configs))
