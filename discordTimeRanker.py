@@ -40,9 +40,6 @@ with open('config.json', 'r') as file:
 
 #------------EVENTS------------#
 
-# I realize that this is n^3 and really bad, but it only gets called 
-# whenever I start up the bot, which is rarely ever because the bot is
-# almost always on.
 @bot.event
 async def on_ready():
     for server in bot.servers:
@@ -247,7 +244,7 @@ async def leaderboard(context, amount):
     try:
         int_amount = int(amount)
     except ValueError as e:
-        await bot.say('A valid number must be entered.')
+        await bot.say('A valid number must be entered. e.g., 1, 2, 3...')
         return
     if int_amount < 1 or int_amount > 15:
         await bot.say('Sorry! I only support numbers between 1 and 15.')
