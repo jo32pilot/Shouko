@@ -59,6 +59,14 @@ async def on_server_join(server):
     stat_event = threading.Event()
     stat_event.set()
     server_events.update({server.id:stat_event})
+    for channel in server.channels:
+        for person in channel.voice_members:
+            m_voice = person.voice
+            if (not m_voice.is_afk and not m_voice.deaf and not m_voice.self_deaf
+                    and person.id not in active_threads[server.id]):
+                new_thread = TimeTracker(server, person)
+                new_thread.start()
+                active_threads[server.id].update({person.id:new_thread})
 
 @bot.event
 async def on_server_remove(server):
@@ -92,6 +100,13 @@ async def on_voice_state_update(before, after):
             del active_threads[after.server.id][after.id]
         except KeyError as e:
             return
+
+@bot.event
+async def on_member_join(member):
+    server_id = member.server.id
+    if member.id not in global_member_times[server_id]:
+        global_member_times[server_id].update({member.id:[0, 0]})
+        
 
 @bot.event
 async def on_server_role_create(role):
@@ -186,7 +201,7 @@ async def on_command_error(error, context):
     elif isinstance(error, commands.CheckFailure):
         await bot.send_message(channel, "You're missing role managing permissions!")
     else:
-        embeder = Embed(type='rich', description="Sorry!, I ran into an error. "
+        embeder = Embed(type='rich', description="Sorry! I ran into an error. "
                         + "Try leaving a new issue comment over at "
                         + "[my Github page](https://github.com/jo32pilot/Shouko/issues/new)"
                         + " describing the situation. It would help a lot!")
@@ -235,9 +250,13 @@ async def settup(context):
 
 @bot.command(pass_context=True)
 async def my_time(context):
-    times = global_member_times[context.message.server.id]
-    time = convert_from_seconds(times[context.message.author.id][0])
-    await bot.say('%s Hours, %s Minutes, %s Seconds' % time)
+    try:
+        times = global_member_times[context.message.server.id]
+        time = convert_from_seconds(times[context.message.author.id][0])
+        await bot.say('%s Hours, %s Minutes, %s Seconds' % time)
+    except KeyError as e:
+        await bot.say('You haven\'t entered a voice channel in this server since '
+                        + 'you last joined it! Join a voice channel to recieve your time.')
 
 @bot.command(pass_context=True)
 async def leaderboard(context, amount):
