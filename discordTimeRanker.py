@@ -783,10 +783,9 @@ def get_roles_in_order(server):
 def update_stats(server):
     with open(server.id + 'stats.txt', 'w') as stats:
         server_times = global_member_times[server.id]
-        iterator = iter(server_times)
-        first_key = next(iterator)
+        first_key = next(iter(server_times))
         stats.write(first_key + '=' + str(server_times[first_key]))
-        for key in iterator:
+        for key in server_times.keys() - first_key:
             stats.write(';' + key + '=' + str(server_times[key]))
 
 def find_user(server, name_list):
