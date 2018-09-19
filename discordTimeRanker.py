@@ -61,6 +61,7 @@ async def on_server_join(server):
     server_events.update({server.id:stat_event})
     for channel in server.channels:
         for person in channel.voice_members:
+            check_stats_presence(person)
             m_voice = person.voice
             if (not m_voice.is_afk and not m_voice.deaf and not m_voice.self_deaf
                     and person.id not in active_threads[server.id]):
@@ -103,10 +104,7 @@ async def on_voice_state_update(before, after):
 
 @bot.event
 async def on_member_join(member):
-    server_id = member.server.id
-    if member.id not in global_member_times[server_id]:
-        global_member_times[server_id].update({member.id:[0, 0]})
-        
+    check_stats_presence(member) 
 
 @bot.event
 async def on_server_role_create(role):
@@ -709,6 +707,11 @@ def config_start(server):
         settings = dict(pair.split('=') for pair in readable.split(';'))
     server_configs.update({server.id:settings})
     curr_config.close()
+
+def check_stats_presence(member):
+    server_id = member.server.id
+    if member.id not in global_member_times[server_id]:
+        global_member_times[server_id].update({member.id:[0, 0]})
 
 def whitelist_start(server):
     if not os.path.isfile(server.id + 'wl.txt'):
