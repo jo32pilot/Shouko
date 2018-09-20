@@ -59,9 +59,10 @@ async def on_server_join(server):
     stat_event = threading.Event()
     stat_event.set()
     server_events.update({server.id:stat_event})
+    for person in server.members:
+        check_stats_presence(person)
     for channel in server.channels:
         for person in channel.voice_members:
-            check_stats_presence(person)
             m_voice = person.voice
             if (not m_voice.is_afk and not m_voice.deaf and not m_voice.self_deaf
                     and person.id not in active_threads[server.id]):
@@ -783,10 +784,12 @@ def get_roles_in_order(server):
 def update_stats(server):
     with open(server.id + 'stats.txt', 'w') as stats:
         server_times = global_member_times[server.id]
-        first_key = next(iter(server_times))
-        stats.write(first_key + '=' + str(server_times[first_key]))
-        for key in server_times.keys() - first_key:
-            stats.write(';' + key + '=' + str(server_times[key]))
+        blank = ''
+        semi_colon = ';'
+        for key in list(server_times.keys()):
+            stats.write(blank + key + '=' + str(server_times[key]))
+            blank = semi_colon
+
 
 def find_user(server, name_list):
     discrim_pattern = r"[0-9]{4}"
