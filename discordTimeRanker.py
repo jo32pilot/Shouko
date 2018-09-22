@@ -50,7 +50,8 @@ async def on_ready():
 
 @bot.event
 async def on_server_join(server):
-    logger.info('Joining server ' + server.name)
+    if server.name is not None:
+        logger.info('Joining server ' + server.name)
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
@@ -59,8 +60,6 @@ async def on_server_join(server):
     stat_event = threading.Event()
     stat_event.set()
     server_events.update({server.id:stat_event})
-    for person in server.members:
-        check_stats_presence(person)
     for channel in server.channels:
         for person in channel.voice_members:
             m_voice = person.voice
@@ -130,10 +129,8 @@ async def on_server_role_create(role):
                 + 'each member will be preserved and rejoining a voice channel '
                 + 'will return everyone\'s deserved ranks.'))
         if reciever is not role.server.default_channel:
-            await bot.send_message(reciever, content=(
-                    + '\nIf you don\'t want to recieve '
-                    + 'any of these messages directly, settup a default channel '
-                    + 'in you server and I\'ll send these over there!'))
+            to_send = 'If you don\'t want to recieve any of these messages directly, settup a default channel in your server and I\'ll send these over there!'
+            await bot.send_message(reciever, content=to_send)
 
 @bot.event
 async def on_server_role_delete(role):
@@ -687,7 +684,14 @@ def stats_start(server):
             time_and_rank = time_and_rank.strip('[\n]')
             time_and_rank = time_and_rank.split(', ')
             time_and_rank[0] = int(float(time_and_rank[0]))
-            time_and_rank[1] = int(time_and_rank[1])
+            try:
+                time_and_rank[1] = int(time_and_rank[1])
+            except ValueError as e:
+                new_rank = time_and_rank[1].rstrip('\\[x0')
+                if new_rank == '':
+                    time_rank_rank[1] = 0
+                else:
+                    time_and_rank[1] = new_rank
             member_times.update({member_id:time_and_rank})
         global_member_times.update({server.id:member_times})
     curr_stats.close()
