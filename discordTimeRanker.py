@@ -472,6 +472,7 @@ async def rank_time(context, *args):
         await bot.say('The formatting of your time argument is incorrect.\n' 
                         + 'Usage: `~ranktime [role_name] [hhh:mm:ss]`\n'
                         + 'Example: ```~ranktime A Cool Role 002:06:34```')
+        return
     if rank in role_orders[server_id]:
         # Handles several edge cases for when a rank already has a specified
         # time. An event object is set to prevent data corruption between
