@@ -2,3 +2,5 @@
 *.txt
 config.json
 test.py
+*.pem
+nohupDir
