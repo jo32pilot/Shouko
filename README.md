@@ -11,6 +11,9 @@ Invite me [here!](https://discordapp.com/oauth2/authorize?client_id=462379854629
 # Acknowledgements
 [discord.py](https://github.com/Rapptz/discord.py)
 
-# Note
-If you noticed the hard coded key in the previous commits, don't worry. That
+# Notes
+* If you noticed the hard coded key in the previous commits, don't worry. That
 key has since been deprecated and replaced.
+* This bot doesn't work on servers with several thousand members. In fact, I have to
+blacklist those servers otherwise the bot might crash upon command usage. Sorry if
+you're one of those servers!

@@ -1,5 +1,6 @@
 *.log
 *.txt
+*.pem
 config.json
 test.py
 *.pem

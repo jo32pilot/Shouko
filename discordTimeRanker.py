@@ -27,6 +27,7 @@ logger.addHandler(handler)
 
 #------------SETTUP------------#
 
+
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
 global_member_times = dict()
@@ -50,6 +51,8 @@ async def on_ready():
 
 @bot.event
 async def on_server_join(server):
+    if server.id in config["server_blacklist"]:
+        return
     if server.name is not None:
         logger.info('Joining server ' + server.name)
     stats_start(server)
@@ -60,6 +63,8 @@ async def on_server_join(server):
     stat_event = threading.Event()
     stat_event.set()
     server_events.update({server.id:stat_event})
+    for person in server.members:
+        check_stats_presence(person) 
     for channel in server.channels:
         for person in channel.voice_members:
             m_voice = person.voice
@@ -72,6 +77,8 @@ async def on_server_join(server):
 @bot.event
 async def on_server_remove(server):
     logger.info('Leaving server ' + server.name)
+    if server.id in config["server_blacklist"]:
+        return
     try:
         del global_member_times[server.id]
         del server_configs[server.id]
@@ -89,6 +96,8 @@ async def on_server_remove(server):
 
 @bot.event
 async def on_voice_state_update(before, after):
+    if before.server.id in config["server_blacklist"]:
+        return
     if (after.voice.voice_channel is not None and not after.voice.is_afk
             and not after.voice.deaf and not after.voice.self_deaf):
         if after.id not in active_threads[after.server.id]:
@@ -104,10 +113,14 @@ async def on_voice_state_update(before, after):
 
 @bot.event
 async def on_member_join(member):
+    if member.server.id in config["server_blacklist"]:
+        return
     check_stats_presence(member) 
 
 @bot.event
 async def on_server_role_create(role):
+    if role.server.id in config["server_blacklist"]:
+        return
     reciever = role.server.default_channel
     if (utils.find(lambda rank: role.name == rank.name and 
             role.id != rank.id, role.server.roles) is not None):
@@ -135,6 +148,8 @@ async def on_server_role_create(role):
 @bot.event
 async def on_server_role_delete(role):
     server_id = role.server.id
+    if server_id in config["server_blacklist"]:
+        return
     if role.name not in server_configs[server_id]:
         return
     times = global_member_times[server_id]
@@ -195,7 +210,10 @@ async def on_command_error(error, context):
         await bot.send_message(channel, "You didn't provide me enough arguments."
                             + " Checkout out the ~help command and try again!")
     elif isinstance(error, commands.CheckFailure):
-        await bot.send_message(channel, "You're missing role managing permissions!")
+        if context.message.server.id in config['server_blacklist']:
+            await bot.send_message(channel, "Commands cannot be done in this server due to complications.")
+        else:
+            await bot.send_message(channel, "You're missing role managing permissions!")
     else:
         embeder = Embed(type='rich', description="Sorry! I ran into an error. "
                         + "Try leaving a new issue comment over at "
@@ -209,6 +227,15 @@ async def on_command_error(error, context):
 # ranks because:
 # 1: Would recursively call itself I tried to fix ranks.
 # 2: Would get called even if a member ranked up normally.
+
+
+
+#------------CHECKS------------#
+
+
+
+def check_server(context):
+    return context.message.channel.server.id not in config["server_blacklist"]
 
 
 
@@ -234,6 +261,7 @@ async def help(context, *cmd):
     await bot.send_message(context.message.channel, embed=embeder)
 
 @bot.command(pass_context=True)
+@commands.check(check_server)
 async def settup(context):
     server_id = context.message.server.id
     to_send = ''
@@ -245,6 +273,7 @@ async def settup(context):
     logger.debug(embeder.fields)
 
 @bot.command(pass_context=True)
+@commands.check(check_server)
 async def my_time(context):
     try:
         times = global_member_times[context.message.server.id]
@@ -255,6 +284,7 @@ async def my_time(context):
                         + 'you last joined it! Join a voice channel to recieve your time.')
 
 @bot.command(pass_context=True)
+@commands.check(check_server)
 async def leaderboard(context, amount):
     try:
         int_amount = int(amount)
@@ -293,7 +323,10 @@ async def leaderboard(context, amount):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def whitelist(context, *name):
+    if len(name) == 0:
+        bot.say('Please enter a name.')
     server = context.message.server
     to_list = find_user(server, name)
     if to_list is None:
@@ -310,7 +343,10 @@ async def whitelist(context, *name):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def unwhitelist(context, *name):
+    if len(name) == 0:
+        bot.say('Please enter a name.')
     server = context.message.server
     times = global_member_times[server.id]
     to_list = find_user(server, name)
@@ -347,6 +383,7 @@ async def unwhitelist(context, *name):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def whitelist_all(context):
     server = context.message.server
     for person in server:
@@ -364,6 +401,7 @@ async def whitelist_all(context):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def unwhitelist_all(context):
     server = context.message.server
     times = global_member_times[server.id]
@@ -384,6 +422,7 @@ async def unwhitelist_all(context):
     await bot.say('Done!')
 
 @bot.command(pass_context=True)
+@commands.check(check_server)
 async def list_whitelist(context):
     server = context.message.server
     to_send = ''
@@ -395,6 +434,7 @@ async def list_whitelist(context):
 
 @bot.command(name='cleanslate', pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def clean_slate(context):
     times = global_member_times[context.message.server.id]
     for person in times:
@@ -403,6 +443,7 @@ async def clean_slate(context):
 
 @bot.command(name='ranktime', pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def rank_time(context, *args):
     if len(args) < 1:
         raise commands.MissingRequiredArgument()
@@ -431,6 +472,7 @@ async def rank_time(context, *args):
         await bot.say('The formatting of your time argument is incorrect.\n' 
                         + 'Usage: `~ranktime [role_name] [hhh:mm:ss]`\n'
                         + 'Example: ```~ranktime A Cool Role 002:06:34```')
+        return
     if rank in role_orders[server_id]:
         # Handles several edge cases for when a rank already has a specified
         # time. An event object is set to prevent data corruption between
@@ -605,6 +647,7 @@ async def rank_time(context, *args):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def rm_ranktime(context, *args):
     server = context.message.server
     rank = ' '.join(args)
@@ -618,6 +661,7 @@ async def rm_ranktime(context, *args):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def rm_usertime(context, *args):
     if len(args) < 1:
         raise commands.MissingRequiredArgument()
@@ -642,6 +686,7 @@ async def rm_usertime(context, *args):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
+@commands.check(check_server)
 async def toggle_messages(context):
     server_id = context.message.server.id
     change_config(server_id, "_send_messages324906", 
@@ -664,17 +709,19 @@ async def donate(context):
 
 
 def stats_start(server):
+    error = False
     if not os.path.isfile(server.id + 'stats.txt'):
         curr_stats = open(server.id + 'stats.txt', 'w')
         global_member_times.update({server.id:dict()})
         for member in server.members:
             global_member_times[server.id].update({member.id:[0, 0]})
             #first element in list = time, second element = rank position
+        return error
     elif os.stat(server.id + 'stats.txt').st_size == 0:
         global_member_times.update({server.id:dict()})
         for member in server.members:
             global_member_times[server.id].update({member.id:[0, 0]})
-        return
+        return error
     else:
         member_times = dict()
         curr_stats = open(server.id + 'stats.txt', 'r')
@@ -684,17 +731,11 @@ def stats_start(server):
             time_and_rank = time_and_rank.strip('[\n]')
             time_and_rank = time_and_rank.split(', ')
             time_and_rank[0] = int(float(time_and_rank[0]))
-            try:
-                time_and_rank[1] = int(time_and_rank[1])
-            except ValueError as e:
-                new_rank = time_and_rank[1].rstrip('\\[x0')
-                if new_rank == '':
-                    time_rank_rank[1] = 0
-                else:
-                    time_and_rank[1] = new_rank
+            time_and_rank[1] = int(time_and_rank[1])
             member_times.update({member_id:time_and_rank})
         global_member_times.update({server.id:member_times})
     curr_stats.close()
+    return error
 
 # the name _send_messages324906 is of no significance. just afraid that,
 # because this option and the ranks are stored in the same dictionary
@@ -901,6 +942,8 @@ class PeriodicUpdater(threading.Thread):
     def run(self):
         while threading.main_thread().is_alive():
             for server in bot.servers:
+                if server.id in config["server_blacklist"]:
+                    continue
                 try:
                     update_stats(server)
                 except KeyError as error:
@@ -910,4 +953,4 @@ class PeriodicUpdater(threading.Thread):
             time.sleep(config['sleep_time'])
         logging.shutdown()
 
-bot.run(config['test_token'])
+bot.run(config['token'])
