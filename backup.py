@@ -14,9 +14,13 @@ from shutil import copyfile
 
 # ------- CONSTANTS ------- #
 
+OVERWRITTEN_ERR_LOG_MESSAGE = ("SERVER: %s: user %s previously had time" 
+                                "%s and now has time %s\n")
 NEW_LOG_MESSAGE = "New files not processed and added to backups\n\t %s\n" 
 OLD_LOG_MESSAGE = "Old files not processed:\n\t %s\n\n"
-ERR_LOG_MESSAGE = "check_valid failed for %s\n"
+CHECK_ERR_LOG_MESSAGE = "check_valid failed for %s\n"
+SPLIT_ERR_LOG_MESSAGE = "Failed to split %s in %s\n"
+SPLIT_DAYS = "< -------- NEW DAY -------- >\n"
 BACKUP_PATH = "./backupStats/%s"
 SPLIT_TIME_AND_RANK = ", "
 FILE_EXT = "stats.txt"
@@ -33,7 +37,7 @@ CURR_DIR = '.'
 # GUESS denotes the amount of people whos times could have
 # possibly been manually reset on any given day.
 # If the number of people of people who's times were reset
-# happens to be bigger than GIVEN, a backup will
+# happens to be bigger than GUESS, a backup will
 # not be created.
 
 GUESS = 3
@@ -98,6 +102,7 @@ def main():
 
     logger.info(NEW_LOG_MESSAGE % str(new_files))
     logger.info(OLD_LOG_MESSAGE % str(backups))
+    logger.info(SPLIT_DAYS)
 
 
 def get_dict(file_path):
@@ -118,14 +123,19 @@ def get_dict(file_path):
 
     # Loop through each user and parse out values
     for pair in readable:
-        member_id, time_and_rank = pair.split(SPLIT_ID_VALUES)
 
-        # Rank and time were written into file as list so get rid of brackets
-        time_and_rank = time_and_rank.strip(EXCESS)
+        try:
+            member_id, time_and_rank = pair.split(SPLIT_ID_VALUES)
 
-        # Get rid of comman between rank and time
-        time_and_rank = time_and_rank.split(SPLIT_TIME_AND_RANK)
-        id_time[member_id] = int(float(time_and_rank[0]))
+            # Rank and time were written into file as list so get rid of brackets
+            time_and_rank = time_and_rank.strip(EXCESS)
+
+            # Get rid of comman between rank and time
+            time_and_rank = time_and_rank.split(SPLIT_TIME_AND_RANK)
+            id_time[member_id] = int(float(time_and_rank[0]))
+
+        except ValueError as e:
+            logger.error(SPLIT_ERR_LOG_MESSAGE, pair, file_path)
 
     curr_stats.close()
     return id_time
@@ -158,6 +168,8 @@ def check_valid(new, backup, filename):
             if new[key] >= backup[key]:
                 continue
             else:
+                logger.info(OVERWRITTEN_ERR_LOG_MESSAGE % 
+                        (filename, key, backup[key], new[key]))
                 tracker += 1
         except KeyError as e:
             key_errors += 1
@@ -166,7 +178,7 @@ def check_valid(new, backup, filename):
     # and also the possibility that the file is just blank, which would be 
     # really really bad.
     if key_errors == len(backup) or tracker >= GUESS:
-        logger.error(ERR_LOG_MESSAGE % filename)
+        logger.error(CHECK_ERR_LOG_MESSAGE % filename)
         return
     else:
         copyfile(filename, BACKUP_PATH % filename)
