@@ -1,0 +1,37 @@
+{
+    "token":"YOUR TOKEN HERE",
+
+    "sleep_time":2,
+
+    "wait_time":0,
+
+    "settup":["`~settup`","Displays your server's ranking settup."],
+
+    "my_time":["`~my_time`","Tells you how much acumulated voice channel time you have."],
+
+    "leaderboard":["`~leaderboard [number_of_people]`","Shows the specified amount of members with the highest accumulated voice channel time on the server. Must be a number between 1 and 15.\nExample Usage: ```~leaderboard 15```"],
+
+    "whitelist":["`~whitelist [discord_username#XXXX]`", "Adds people to the whitelist. People on the whitelist are not ranked by time but still have their time tracked. Names are case sensitive. Requires role managing permissions.\nExample usage: ```~whitelist Shouko Nishimiya#1234```"],
+
+    "unwhitelist":["`~unwhitelist [discord_username#XXXX]`", "Removes people from the whitelist. People removed will be given back their deserved ranks upon rejoining a non-afk voice channel if not immediately. Names are case sensitive. Requires role managing permissions\nExample usage: ```~unwhitelist Shouko Nishimiya#1234```"],
+
+    "whitelist_all":["`~whitelist_all`", "Adds everyone on the server to the whitelist. Requires role managing permissions"],
+
+    "unwhitelist_all":["`~unwhitelist_all`", "Clears the whitelist. Requires role managing permissions"],
+
+    "cleanslate":["`~cleanslate`", "Resets underlying user rank values. Use this to fix any issues that may occur. Be assured that all accumulated voice channel times are kept. All this means is that users have to rejoin a non-afk voice channel to regain their appropriate rank. Requires role managing permissions"],
+
+    "list_whitelist":["`~list_whitelist`","Shows all members on the whitelist."],
+
+    "ranktime":["`~ranktime [role_name] [hhh:mm:ss]`", "Sets time milestone for [role_name]. Members who have spent [hhh:hh:ss] will have their current role replaced with [role_name]. Members will retain all roles that do not have times associated with them. Inputing 000:00:00 will only assign the stated rank to new users once they have joined a voice channel. [role_name] must exists as a role in your Discord server. I advise removing any roles with the same names as that may break the functionality of the bot for this server. If such issues do surface, please follow these steps:\n\n1: Remove the duplicate role from the server.\n2: Use the ~ranktime command to re-add the desired rank and time as deleting a role from a server will remove the rank with the same name and its respective time.\n3: Use the ~cleanslate command to reset member ranks. \n\nRank names are case sensitive. Requires role managing permissions\nExample usage: ```~ranktime A Cool Role 002:06:34```"],
+
+    "rm_ranktime":["`~rm_ranktime [role_name]`", "Removes [role_name] and its rank time from the settup."],
+
+    "rm_usertime":["`~rm_usertime [discord_username#XXXX]`","Resets a member's time and rank. Any rank not in the server settup will be retained. Names are case sensitive. Requires role managing permissions.\nExample usage:```~rm_usertime Shouko Nishimiya#1234```"],
+
+    "toggle_messages":["`~toggle_messages`","If false, sends rank update messages to members rather than the default channel if there exists one. Defaults to True. Requires role managing permissions"],
+    
+    "github_url":"You can view the code [here](https://github.com/jo32pilot/Shouko)",
+
+    "patreon":"Donate [here!](https://www.patreon.com/no_one0)"
+}
