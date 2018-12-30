@@ -1,3 +1,75 @@
+"""
+
+Defines functionality for the discord bot, Shouko. Keeps track of user time
+spent in voice channels. Server members with role managing permissions can
+allow the bot to assign discord roles based on accumulated time.
+
+Example:
+
+    $ python3 discordTimeRanker.py
+
+
+Attributes:
+    bot (Bot): The bot object running on each server.
+
+    server_configs (dict): Holds (server_id, dict) pairs where 
+        server_id indicates what server the dictionary value belongs to. The 
+        dictionary value holds mainly (role, time_milestone) pairs where
+        role is assigned to any member in the same server upon reaching the
+        time_milestone (in seconds). Also is meant to hold other server 
+        configurations, the only other one being (_send_messages324906, bool) 
+        where if bool is true, upon rank up, congratulations are sent to the 
+        server's defaultchannel, otherwise it is sent directly to the user.
+        Note that:
+            server_id is always (string),
+            time_milestone is always (int).
+
+    global_member_times (dict): Holds (server_id, dict) pairs where server_id
+        indicates what server the dictionary value belongs to. The dictionary
+        value holds (user_id, list) pairs where user_id is a unique user id
+        assigned by Discord and list holds two elemnts, [time, role]. Time
+        is an integer representing a users total accumulated time.
+        Role is an integer representing the users current role in the role
+        hierarchy organized by role orders.
+        Ex.
+
+                    Role Hierarchy: [Peasant, Craftsman, Noble, Royalty]
+            Integer Representation: [      0,         1,     2,       3]
+
+            [1000, 2] means user_id is a Noble with 1000 seconds spent in
+            the server's voice channels.
+
+        Note that:
+            user_id is always (string)
+
+    role_orders (dict): Holds (server_id, list) pairs where server_id indicates
+        what server the list value belongs to. The list holds server roles
+        ordered by their time_milestones in ascending order. This way, we
+        now where each role stands in the heirarchy and can represent each
+        person's role as an integer
+
+    server_wl (dict): Holds (server_id, list) pairs where server_id indicates
+        what server the list value belongs to. The list holds whitelisted 
+        user_ids for their server. A whitelisted user will not be affected
+        by automatic roll assigning but will still accumulate time for staying
+        in voice channels. Whitelisted users can be manually assigned roles
+        without reprecussions. (As in the bot's functionality might break for
+        that specific server).
+
+    server_events (dict): Holds (server_id, Event) pairs where server_id 
+        indicates what server the Event value belongs to. Event is the Event 
+        object from the threading module. Used to help prevent race conditions.
+
+    active_threads (dict): Holds (server_id, dict) pairs where server_id
+        indicates what server the dict value belongs to. The dictionary
+        value holds (user_id, TimeTracker) pairs. TimeTracker extends the 
+        Thread from the threading module. TimeTracker is explained in the class
+        definition.
+
+    config (dict): Holds (key, value) pairs parsed from config.json.
+
+
+"""
 import re
 import sys
 import json
@@ -25,8 +97,7 @@ handler.setFormatter(
         logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 logger.addHandler(handler)
 
-#------------SETTUP------------#
-
+#------------SETTUP / ATTRIBUTES------------#
 
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
@@ -40,21 +111,49 @@ with open('config.json', 'r') as file:
     config = json.load(file)
 
 #------------EVENTS------------#
+# NOTE: All event function headers are explained in the reference for the 
+# API.
 
 @bot.event
 async def on_ready():
+    """Event called when bot begins to run.
+
+    Calls on_server_join event for each server to set up server stats and
+    configurations. Also begins the PeriodicUpdater thread. PeriodicUpdater
+    is explained in the class definition.
+
+    """
     for server in bot.servers:
         await bot.on_server_join(server)
+
     PeriodicUpdater().start()
     await bot.change_presence(game=Game(name='on a ferris wheel | ~help'))
     logger.info(str(server_configs))
 
+
 @bot.event
 async def on_server_join(server):
+    """Event called when bot joins the server.
+
+    Creates appropriate files to write server configurations and stats to.
+    Sets up appropriate attribute dictionaries for the server joined. Also
+    starts TimeTracker threads to start accumulating times for users 
+    in voice channels upon the bot joining.
+
+    """
+
+    # On servers with 2500 or more members (not a definitive lower bound, could 
+    # be more or less) the files begin to get written with hexdecimal values in
+    # odd places. This renders my method of parsing text files useless so I
+    # have to blacklist those servers. Plan to move config and stats to a 
+    # database to alleviate this problem.
     if server.id in config["server_blacklist"]:
         return
+
     if server.name is not None:
         logger.info('Joining server ' + server.name)
+
+    # Fills up attribute dictionaries and creates appropriate text files.
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
@@ -63,8 +162,13 @@ async def on_server_join(server):
     stat_event = threading.Event()
     stat_event.set()
     server_events.update({server.id:stat_event})
+
+    # Check if people joined since bot was last on since on_ready relies on this
+    # function as well.
     for person in server.members:
         check_stats_presence(person) 
+
+    # Start TimeTrackers threads for people in voice channels.
     for channel in server.channels:
         for person in channel.voice_members:
             m_voice = person.voice
@@ -76,9 +180,20 @@ async def on_server_join(server):
 
 @bot.event
 async def on_server_remove(server):
+    """Event called when bot leaves a server.
+
+    Removes from attribute dictionaries all server configs and stats for the
+    specified server. Note that 
+
+    """
     logger.info('Leaving server ' + server.name)
+
+    # Don't do anything if leaving a blacklisted server, no values were created
+    # in the first place.
     if server.id in config["server_blacklist"]:
         return
+
+    # Deletion of dictionary values.
     try:
         del global_member_times[server.id]
         del server_configs[server.id]
@@ -87,6 +202,8 @@ async def on_server_remove(server):
         del server_events[server.id]
     except (ValueError, KeyError) as e:
         logger.error('Failed to remove server information from ' + server.id)
+
+    # Stops all running threads in that server.
     try:
         for person in active_threads[server.id]:
             active_threads[server.id][person].bot_in_server = False
@@ -96,14 +213,30 @@ async def on_server_remove(server):
 
 @bot.event
 async def on_voice_state_update(before, after):
+    """Event called whenever a user's voice state changes.
+
+    Checks various cases and acts on TimeTracker thread accordingly.
+    If the user is deafened, stop accumulating time.
+    If the user is in an afk channel, stop accumulating time.
+    Otherwise, as long as the user is in a voice channel, accumulate time.
+    
+    """
     if before.server.id in config["server_blacklist"]:
         return
+
+    # Check if user is not deafened or afk and in a voice channel.
     if (after.voice.voice_channel is not None and not after.voice.is_afk
             and not after.voice.deaf and not after.voice.self_deaf):
+
+        # Possible another event occured that still allows user to have time 
+        # kept. Checks if that is the case by checking if there is already a 
+        # thread for the user.
         if after.id not in active_threads[after.server.id]:
             new_thread = TimeTracker(after.server, after)
             new_thread.start()
             active_threads[after.server.id].update({after.id:new_thread})
+
+    # Otherwise, check if we should stop accumulating time for the user.
     elif (after.voice.voice_channel is None or after.voice.is_afk
             or after.voice.deaf or after.voice.self_deaf):
         try:
@@ -119,20 +252,35 @@ async def on_member_join(member):
 
 @bot.event
 async def on_server_role_create(role):
+    """Event called when a new role is added to the server.
+
+    It is possible to have multiple roles with the same name in the server.
+    If that happens, there is no guarentee of the bot's proper functionality
+    in the server where the role was created.
+    This function warns the server where such a role was created and informs
+    them in how to activate the failsafe in the event that the bot does break.
+        
+    """
     if role.server.id in config["server_blacklist"]:
         return
+
     reciever = role.server.default_channel
+
+    # Checks if at least two ranks have the same name but have a different id.
     if (utils.find(lambda rank: role.name == rank.name and 
             role.id != rank.id, role.server.roles) is not None):
+
+        # Checks where to send the message.
         if reciever is None or reciever.type != ChannelType.text:
             reciever = role.server.owner
+
         await bot.send_message(reciever, content=(
                 'Hey, I that see you, or someone else with permission, '
                 + 'created a role with the same name as '
                 + 'another role on your server. Just a reminder that, '
                 + 'before configuring any rank times, please be aware '
                 + 'that I cannot guarantee that the correct version '
-                + 'will be assigned and that any reconfiuration of '
+                + 'will be assigned and that any reconfiguration of '
                 + 'said rank may cause the ranking system to fail. '
                 + 'If such issues do surface, please follow these steps:\n\n'
                 + '1: Remove the duplicate role from the server.\n2: Use the '
@@ -147,25 +295,50 @@ async def on_server_role_create(role):
 
 @bot.event
 async def on_server_role_delete(role):
+    """Event called when a server deletes a role.
+
+    Updates underlying ranking structure settup in the attribute dictionaries.
+    Also reassigns roles accordingly.
+        
+    """
     server_id = role.server.id
     if server_id in config["server_blacklist"]:
         return
+
+    # If role didn't have a time associated with it, don't do anything.
     if role.name not in server_configs[server_id]:
         return
     times = global_member_times[server_id]
+
+    # Block any threads that might cause a race condition until roles are done
+    # updating.
     server_events[server_id].clear()
     for person in active_threads[server_id]:
         while not active_threads[server_id][person].block_update:
             continue
+
+    # Reorder role heirarchy, again, based on their associated times in
+    # ascending order.
     role_index = role_orders[server_id].index(role.name)
     old_server_configs = copy.deepcopy(server_configs[server_id])
     previous_role_orders = copy.deepcopy(role_orders[server_id])
+
+    # Remove the role and any configuartions relying on it.
     delete_config(server_id, role.name)
     role_orders[server_id].remove(role.name)
+
+    # Looping over the difference in the two sets to ignore people on the
+    # whitelist.
     for person in (set(times.keys()) - set(server_wl[server_id])):
         person_obj = utils.find(lambda member: member.id == person,
                                 role.server.members)
+
+        # given_roles is a list of a user's roles that do not have a time
+        # milestone associated with them. These should be returned to the user.
         given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+
+        # If the user has achieved at least the role with the lowest time
+        # milestone, they could be affected
         if times[person][1] - 1 >= 0:
             curr_rank = previous_role_orders[times[person][1] - 1]
             curr_rank_time = convert_time(old_server_configs[curr_rank])
@@ -174,46 +347,74 @@ async def on_server_role_delete(role):
             curr_rank = None
             curr_rank_time = -1
             curr_rank_pos = -1
+
+        # If the user can demote one role (they have a role below them that
+        # they can revert back to)
         if times[person][1] - 2 >= 0:
             previous_rank = previous_role_orders[times[person][1] - 2]
         else:
             previous_rank = None
+
+        # If the user is the role that is being removed.
         if curr_rank is not None and curr_rank == role.name:
+
+            # Attempt to revoke their current role and replace it with a lower
+            # role or none at all (and give them back given_roles)
             try:
                 await bot.replace_roles(person_obj, utils.find(lambda prev_obj: (
                                     prev_obj.name == previous_rank), role.server.roles), *given_roles)
             except (discord.errors.Forbidden, AttributeError) as e:
                 logger.info(person_obj.name + ':' + person + ' : Exception Occured')
             times[person][1] -= 1
-        else:
-            if (times[person][1] > 0 and curr_rank is not None and
-                    role_index < curr_rank_pos):
-                times[person][1] -= 1
+        
+        # User might have a role with higher time milestone than the one being
+        # removed. If so, just update underlying ranking structure to represent
+        # this. 
+        elif (times[person][1] > 0 and curr_rank is not None and
+                role_index < curr_rank_pos):
+            times[person][1] -= 1
+
+        # Attempts to update some TimeTracker fields which are needed to update
+        # roles properly.
         try:
+            
             try:
                 next_rank = role_orders[server_id][times[person][1]]
                 next_rank_time = convert_time(server_configs[server_id][next_rank])
                 active_threads[server_id][person].next_rank = next_rank
                 active_threads[server_id][person].rank_time = next_rank_time
+
+            # Handles if user is already highest role.
             except IndexError as e:
                 active_threads[server_id][person].rank_time = None
+
+        # Thread might not exist.
         except (AttributeError, KeyError) as exc:
             continue
     server_events[server_id].set()
 
 @bot.event
 async def on_command_error(error, context):
+    """Event called when an error is raised.
+
+    Handles all known errors and logs all others.
+
+    """
     channel = context.message.channel
+
     if isinstance(error, commands.CommandNotFound):
         pass
+
     elif isinstance(error, commands.MissingRequiredArgument):
         await bot.send_message(channel, "You didn't provide me enough arguments."
                             + " Checkout out the ~help command and try again!")
+
     elif isinstance(error, commands.CheckFailure):
         if context.message.server.id in config['server_blacklist']:
             await bot.send_message(channel, "Commands cannot be done in this server due to complications.")
         else:
             await bot.send_message(channel, "You're missing role managing permissions!")
+
     else:
         embeder = Embed(type='rich', description="Sorry! I ran into an error. "
                         + "Try leaving a new issue comment over at "
@@ -223,18 +424,18 @@ async def on_command_error(error, context):
         logger.error(context.message.content + '\n' + ''.join(traceback.format_exception(
                         type(error), error, error.__traceback__)))
 
-# cannot implement on_member_update event to account for manually assigned 
-# ranks because:
-# 1: Would recursively call itself I tried to fix ranks.
-# 2: Would get called even if a member ranked up normally.
-
-
 
 #------------CHECKS------------#
-
+# NOTE: All parameters named "context" are explained in the Discord API 
+# reference.
 
 
 def check_server(context):
+    """Checks if server is blacklisted.
+    
+    Used with the discord.commands module's check decorator.
+
+    """
     return context.message.channel.server.id not in config["server_blacklist"]
 
 
