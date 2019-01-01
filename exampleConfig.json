@@ -1,7 +1,13 @@
 {
     "token":"YOUR TOKEN HERE",
 
-    "sleep_time":2,
+    "test_token":"OR HERE",
+
+    "server_blacklist":[],
+
+    "to_leave":2500,
+
+    "sleep_time":5,
 
     "wait_time":0,
 
@@ -23,7 +29,7 @@
 
     "list_whitelist":["`~list_whitelist`","Shows all members on the whitelist."],
 
-    "ranktime":["`~ranktime [role_name] [hhh:mm:ss]`", "Sets time milestone for [role_name]. Members who have spent [hhh:hh:ss] will have their current role replaced with [role_name]. Members will retain all roles that do not have times associated with them. Inputing 000:00:00 will only assign the stated rank to new users once they have joined a voice channel. [role_name] must exists as a role in your Discord server. I advise removing any roles with the same names as that may break the functionality of the bot for this server. If such issues do surface, please follow these steps:\n\n1: Remove the duplicate role from the server.\n2: Use the ~ranktime command to re-add the desired rank and time as deleting a role from a server will remove the rank with the same name and its respective time.\n3: Use the ~cleanslate command to reset member ranks. \n\nRank names are case sensitive. Requires role managing permissions\nExample usage: ```~ranktime A Cool Role 002:06:34```"],
+    "ranktime":["`~ranktime [role_name] [hhh:mm:ss]`", "Sets time milestone for [role_name]. Members who have spent [hhh:hh:ss] will have their current role replaced with [role_name]. **__I can only assign a role which is lower than my own on the role hierarchy. In the server settings, please drag my highest role above roles that you want me to assign.__** Members will retain all roles that do not have times associated with them. Inputing 000:00:00 will only assign the stated rank to new users once they have joined a voice channel. [role_name] must exists as a role in your Discord server. I advise removing any roles with the same names as that may break the functionality of the bot for this server. If such issues do surface, please follow these steps:\n\n1: Remove the duplicate role from the server.\n2: Use the ~ranktime command to re-add the desired rank and time as deleting a role from a server will remove the rank with the same name and its respective time.\n3: Use the ~cleanslate command to reset member ranks. \n\nRank names are case sensitive. Requires role managing permissions\nExample usage: ```~ranktime A Cool Role 002:06:34```"],
 
     "rm_ranktime":["`~rm_ranktime [role_name]`", "Removes [role_name] and its rank time from the settup."],
 

@@ -87,6 +87,25 @@ from discord import Embed
 from discord.ext import commands
 from discord.ext.commands import Bot
 
+#------------CONSTANTS------------#
+
+_HIGH_RANK = 2                # Minimum number of roles user must be above in
+                              # the hierarchy for some edge cases.
+                             
+_HELP_COLOR = 26575           # Color to embed.
+_SETTUP_COLOR = 3866383
+_BOARD_COLOR = 16755456
+_WHITELIST_COLOR = 16777215
+_LINK_COLORS = 26575
+
+_MAX_BOARD_SIZE = 15          # Maximum amount of people to be shown on a
+                              # leaderboard.
+
+_SECONDS = 60                 # Seconds in a minute.
+_MINUTES = 60                 # Minutes in an hour.
+
+#------------LOGGING------------#
+
 #Sets up logging. Template taken from 
 # discordpy.readthedocs.io/en/latest/logging.html
 logger = logging.getLogger('discord')
@@ -172,7 +191,8 @@ async def on_server_join(server):
     for channel in server.channels:
         for person in channel.voice_members:
             m_voice = person.voice
-            if (not m_voice.is_afk and not m_voice.deaf and not m_voice.self_deaf
+            if (not m_voice.is_afk and not m_voice.deaf and 
+                    not m_voice.self_deaf
                     and person.id not in active_threads[server.id]):
                 new_thread = TimeTracker(server, person)
                 new_thread.start()
@@ -290,7 +310,9 @@ async def on_server_role_create(role):
                 + 'each member will be preserved and rejoining a voice channel '
                 + 'will return everyone\'s deserved ranks.'))
         if reciever is not role.server.default_channel:
-            to_send = 'If you don\'t want to recieve any of these messages directly, settup a default channel in your server and I\'ll send these over there!'
+            to_send = ('If you don\'t want to recieve any of these messages '
+                    + 'directly, settup a default channel in your server and '
+                    + 'I\'ll send these over there!')
             await bot.send_message(reciever, content=to_send)
 
 @bot.event
@@ -335,7 +357,8 @@ async def on_server_role_delete(role):
 
         # given_roles is a list of a user's roles that do not have a time
         # milestone associated with them. These should be returned to the user.
-        given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+        given_roles = [role for role in person_obj.roles 
+                if role.name not in role_orders[server_id]]
 
         # If the user has achieved at least the role with the lowest time
         # milestone, they could be affected
@@ -350,8 +373,8 @@ async def on_server_role_delete(role):
 
         # If the user can demote one role (they have a role below them that
         # they can revert back to)
-        if times[person][1] - 2 >= 0:
-            previous_rank = previous_role_orders[times[person][1] - 2]
+        if times[person][1] - _HIGH_RANK >= 0:
+            previous_rank = previous_role_orders[times[person][1] - _HIGH_RANK]
         else:
             previous_rank = None
 
@@ -361,10 +384,13 @@ async def on_server_role_delete(role):
             # Attempt to revoke their current role and replace it with a lower
             # role or none at all (and give them back given_roles)
             try:
-                await bot.replace_roles(person_obj, utils.find(lambda prev_obj: (
-                                    prev_obj.name == previous_rank), role.server.roles), *given_roles)
+                await bot.replace_roles(person_obj, utils.find(
+                        lambda prev_obj: (prev_obj.name == previous_rank), 
+                        role.server.roles), *given_roles)
+
             except (discord.errors.Forbidden, AttributeError) as e:
-                logger.info(person_obj.name + ':' + person + ' : Exception Occured')
+                logger.info('%s:%s : Exception Occured' % 
+                        (person_obj.name, person))
             times[person][1] -= 1
         
         # User might have a role with higher time milestone than the one being
@@ -380,7 +406,8 @@ async def on_server_role_delete(role):
             
             try:
                 next_rank = role_orders[server_id][times[person][1]]
-                next_rank_time = convert_time(server_configs[server_id][next_rank])
+                next_rank_time = convert_time(
+                        server_configs[server_id][next_rank])
                 active_threads[server_id][person].next_rank = next_rank
                 active_threads[server_id][person].rank_time = next_rank_time
 
@@ -406,23 +433,27 @@ async def on_command_error(error, context):
         pass
 
     elif isinstance(error, commands.MissingRequiredArgument):
-        await bot.send_message(channel, "You didn't provide me enough arguments."
-                            + " Checkout out the ~help command and try again!")
+        await bot.send_message(channel, "You didn't provide me enough arguments"
+                            + ". Checkout out the ~help command and try again!")
 
     elif isinstance(error, commands.CheckFailure):
         if context.message.server.id in config['server_blacklist']:
-            await bot.send_message(channel, "Commands cannot be done in this server due to complications.")
+            await bot.send_message(channel, "Commands cannot be done in this" 
+                    + "server due to complications.")
         else:
-            await bot.send_message(channel, "You're missing role managing permissions!")
+            await bot.send_message(channel, "You're missing role managing"
+                  + "permissions!")
 
     else:
         embeder = Embed(type='rich', description="Sorry! I ran into an error. "
                         + "Try leaving a new issue comment over at "
-                        + "[my Github page](https://github.com/jo32pilot/Shouko/issues/new)"
+                        + "[my Github page](https://github.com/jo32pilot/Shouko"
+                        + "/issues/new)"
                         + " describing the situation. It would help a lot!")
         await bot.send_message(channel, embed=embeder)
-        logger.error(context.message.content + '\n' + ''.join(traceback.format_exception(
-                        type(error), error, error.__traceback__)))
+        logger.error(context.message.content + '\n' + 
+                ''.join(traceback.format_exception(type(error), error, 
+                error.__traceback__)))
 
 
 #------------CHECKS------------#
@@ -456,7 +487,7 @@ async def help(context, *cmd):
             a help message with a list of acceptable arguments is sent.
         
     """
-    embeder = Embed(colour=26575, type='rich')
+    embeder = Embed(colour=_HELP_COLOR, type='rich')
 
     # Attempts to find first argument from command.
     try:
@@ -495,7 +526,8 @@ async def settup(context):
     for role in role_orders[server_id][::-1]:
         to_send = (to_send + role + ': ' 
                 + server_configs[server_id][role] + '\n')
-    embeder = Embed(title='Rank Settup', colour=3866383, type='rich', description=to_send)
+    embeder = Embed(title='Rank Settup', colour=_SETTUP_COLOR, type='rich', 
+            description=to_send)
     await bot.send_message(context.message.channel, embed=embeder)
     logger.debug(embeder.fields)
 
@@ -513,8 +545,9 @@ async def my_time(context):
         time = convert_from_seconds(times[context.message.author.id][0])
         await bot.say('%s Hours, %s Minutes, %s Seconds' % time)
     except KeyError as e:
-        await bot.say('You haven\'t entered a voice channel in this server since '
-                        + 'you last joined it! Join a voice channel to recieve your time.')
+        await bot.say('You haven\'t entered a voice channel in this server '
+                + 'since you last joined it! Join a voice channel to recieve '
+                + 'your time.')
 
 @bot.command(pass_context=True)
 @commands.check(check_server)
@@ -532,13 +565,14 @@ async def leaderboard(context, amount):
     except ValueError as e:
         await bot.say('A valid number must be entered. e.g., 1, 2, 3...')
         return
-    if int_amount < 1 or int_amount > 15:
+    if int_amount < 1 or int_amount > _MAX_BOARD_SIZE:
         await bot.say('Sorry! I only support numbers between 1 and 15.')
         return
 
     server = context.message.server
     times = global_member_times[server.id]
-    embeder = Embed(title=('Top %s Server Member Times' % amount), colour=16755456, type='rich')
+    embeder = Embed(title=('Top %s Server Member Times' % amount), 
+            colour=_BOARD_COLOR, type='rich')
 
     # Get users sorted by their accumuluated time in ascending order
     to_sort = dict()
@@ -555,7 +589,8 @@ async def leaderboard(context, amount):
     # time.
     for person in sorted_list[:top_x:-1]:
         try:
-            top_memb = utils.find(lambda member: member.id == person, server.members)
+            top_memb = utils.find(lambda member: member.id == person, 
+                    server.members)
             time_spent = convert_from_seconds(times[person][0])
 
             # If user has a default profile picture.
@@ -597,7 +632,8 @@ async def whitelist(context, *name):
 
     """
     if len(name) == 0:
-        bot.say('Please enter a name.')
+        await bot.say('Please enter a name.')
+        return
     server = context.message.server
     to_list = find_user(server, name)
 
@@ -605,7 +641,8 @@ async def whitelist(context, *name):
     if to_list is None:
         await bot.say('Sorry! I can\'t find this person. '
                 + 'Remember that the format for this command is \n\n'
-                + '`~whitelist [discord_username#XXXX]` (Names are case sensitive)'
+                + '`~whitelist [discord_username#XXXX]` '
+                + '(Names are case sensitive)'
                 + '\n\nExample usage: ```~whitelist Shouko Nishimiya#1234```')
 
     elif to_list.id in server_wl[server.id]:
@@ -641,8 +678,10 @@ async def unwhitelist(context, *name):
     if to_list is None:
         await bot.say('Sorry! I can\'t find this person. '
                 + 'Remember that the format for this command is\n\n'
-                + '`~unwhitelist [discord_username#XXXX]` (Names are case sensitive)'
-                + '\n\n Example usage: ```~unwhitelist Shouko Nishimiya#1234```')
+                + '`~unwhitelist [discord_username#XXXX]` '
+                + '(Names are case sensitive)'
+                + '\n\n Example usage: '
+                + '```~unwhitelist Shouko Nishimiya#1234```')
     elif to_list.id not in server_wl[server.id]:
         await bot.say('Member is already not on the whitelist.')
 
@@ -657,7 +696,8 @@ async def unwhitelist(context, *name):
             # will handle the role updates.
             try:
                 new_rank = role_orders[server.id][times[to_list.id][1]]
-                new_rank_time = convert_time(server_configs[server.id][new_rank])
+                new_rank_time = convert_time(
+                        server_configs[server.id][new_rank])
                 active_threads[server.id][to_list.id].next_rank = new_rank
                 active_threads[server.id][to_list.id].rank_time = new_rank_time
             except IndexError as e:
@@ -726,7 +766,8 @@ async def unwhitelist_all(context):
         try:
             try: 
                 new_rank = role_orders[server.id][times[person][1]]
-                new_rank_time = convert_time(server_configs[server.id][new_rank])
+                new_rank_time = convert_time(
+                        server_configs[server.id][new_rank])
                 active_threads[server.id][person].next_rank = new_rank
                 active_threads[server.id][person].rank_time = new_rank_time
             except IndexError as e:
@@ -749,8 +790,9 @@ async def list_whitelist(context):
     to_send = ''
     for person in server_wl[server.id]:
         to_list = utils.find(lambda member: member.id == person, server.members)
-        to_send = to_send + to_list.name + '#' + to_list.discriminator + '\n'
-    embeder = Embed(title='Whitelist', colour=16777215, type='rich', description=to_send)
+        to_send = '%s%s#%s\n' % (to_send, to_list.name, to_list.discriminator)
+    embeder = Embed(title='Whitelist', colour=_WHITELIST_COLOR, type='rich', 
+            description=to_send)
     await bot.send_message(context.message.channel, embed=embeder)
 
 @bot.command(name='cleanslate', pass_context=True)
@@ -817,8 +859,8 @@ async def rank_time(context, *args):
         if role.name == rank:
             count += 1
             if(count > 1):
-                await bot.say('Cannot change rank time if multiple ranks have the '
-                                + 'same name.')
+                await bot.say('Cannot change rank time if multiple ranks have '
+                        + 'the same name.')
                 return
 
     # Couldn't find role at all.
@@ -829,8 +871,8 @@ async def rank_time(context, *args):
     # Search for ranks with the same time
     for a_rank in role_orders[server_id]:
         if (server_configs[server_id][a_rank]) == time:
-            await bot.say('Sorry, we do not support ranks having the same times '
-                            + 'at this moment.')
+            await bot.say('Sorry, we do not support ranks having the same times'
+                    + ' at this moment.')
             return
     new_time = convert_time(time)
 
@@ -855,12 +897,14 @@ async def rank_time(context, *args):
         old_server_configs = copy.deepcopy(server_configs[server_id])
         change_config(server_id, rank, str(time))
         previous_role_orders = copy.deepcopy(role_orders[server_id])
-        role_orders.update({server_id:get_roles_in_order(context.message.server)})
+        role_orders.update(
+                {server_id:get_roles_in_order(context.message.server)})
 
         # Get integer role value.
         rank_after_new = role_orders[server_id].index(rank)
         rank_before_new = previous_role_orders.index(rank)
-        rank_obj = utils.find(lambda role: role.name == rank, context.message.server.roles)
+        rank_obj = utils.find(lambda role: role.name == rank, 
+                context.message.server.roles)
 
         # For all people not on the whitelist
         for person in (set(times.keys()) - set(server_wl[server_id])):
@@ -870,7 +914,8 @@ async def rank_time(context, *args):
             try:
 
                 # Get all roles without time milestones associated with them.
-                given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+                given_roles = [role for role in person_obj.roles 
+                        if role.name not in role_orders[server_id]]
 
             except AttributeError as e:
                 pass
@@ -892,7 +937,8 @@ async def rank_time(context, *args):
             # Check if user has roles in the role hierarchy below their own.
             if times[person][1] - 2 >= 0:
                 previous_rank = previous_role_orders[times[person][1] - 2]
-                previous_rank_time = convert_time(old_server_configs[previous_rank])
+                previous_rank_time = convert_time(
+                        old_server_configs[previous_rank])
 
             # Skip some steps if not.
             else:
@@ -906,7 +952,8 @@ async def rank_time(context, *args):
                 try:
                     await bot.replace_roles(person_obj, rank_obj, *given_roles)
                 except discord.errors.Forbidden as e:
-                    logger.info(person_obj.name + ':' + person + 'Failed to update')
+                    logger.info('%s:%s : Failed to update' % 
+                            (person_obj.name, person))
 
                 # Sets up next rank to attain if there is one
                 if (times[person][1] < len(role_orders[server_id]) and 
@@ -927,17 +974,20 @@ async def rank_time(context, *args):
                         try:
                             await bot.replace_roles(person_obj, *given_roles)
                         except discord.errors.Forbidden as e:
-                            logger.info(person_obj.name + ':' + person + 'Failed to update')
+                            logger.info('%s:%s : Failed to update' % 
+                                    (person_obj.name, person))
                             continue
 
                     # Otherwise, attempt to give the user the role below theirs.
                     elif times[person][1] - 1 > 0:
                         previous_role = utils.find(lambda role: previous_rank 
-                                                    == role.name, context.message.server.roles)
+                                == role.name, context.message.server.roles)
                         try:
-                            await bot.replace_roles(person_obj, previous_role, *given_roles)
+                            await bot.replace_roles(person_obj, previous_role, 
+                                    *given_roles)
                         except discord.errors.Forbidden as e:
-                            logger.info(person_obj.name + ':' + person + 'Failed to update')
+                            logger.info('%s:%s : Failed to update' % 
+                                    (person_obj.name, person))
                             continue
 
                     # Update user's next role to attain.
@@ -958,13 +1008,17 @@ async def rank_time(context, *args):
                 # i.e., the user was a Noble, but after some shifts in time,
                 # the user is now a craftsman, which is higher ranked than a
                 # Noble now.
-                elif times[person][0] > new_time and previous_rank_time > new_time:
+                elif (times[person][0] > new_time and 
+                        previous_rank_time > new_time):
+
                     previous_role = utils.find(lambda role: previous_rank
-                                                == role.name, context.message.server.roles)
+                            == role.name, context.message.server.roles)
                     try:
-                        await bot.replace_roles(person_obj, previous_role, *given_roles)
+                        await bot.replace_roles(person_obj, previous_role, 
+                                *given_roles)
                     except discord.errors.Forbidden as e:
-                        logger.info(person_obj.name + ':' + person + 'Failed to update')
+                        logger.info('%s:%s : Failed to update' % 
+                                (person_obj.name, person))
                         continue
 
             # Might not affect current role but need to update users' role
@@ -993,7 +1047,8 @@ async def rank_time(context, *args):
             try:
                 try:
                     new_rank = role_orders[server_id][times[person][1]]
-                    new_rank_time = convert_time(server_configs[server_id][new_rank])
+                    new_rank_time = convert_time(
+                            server_configs[server_id][new_rank])
                     active_threads[server_id][person].next_rank = new_rank
                     active_threads[server_id][person].rank_time = new_rank_time
                 except IndexError as e:
@@ -1017,9 +1072,11 @@ async def rank_time(context, *args):
         old_server_configs = copy.deepcopy(server_configs[server_id])
         change_config(server_id, rank, str(time))
         previous_role_orders = copy.deepcopy(role_orders[server_id])
-        role_orders.update({server_id:get_roles_in_order(context.message.server)})
+        role_orders.update(
+                {server_id:get_roles_in_order(context.message.server)})
         rank_after_new = role_orders[server_id].index(rank)
-        rank_obj = utils.find(lambda role: role.name == rank, context.message.server.roles)
+        rank_obj = utils.find(lambda role: role.name == rank, 
+                context.message.server.roles)
 
         # For everyone not on the whitelist
         for person in (set(times.keys()) - set(server_wl[server_id])):
@@ -1028,7 +1085,8 @@ async def rank_time(context, *args):
 
             # Get all roles without time milestones to reassign to the user.
             try:
-                given_roles = [role for role in person_obj.roles if role.name not in role_orders[server_id]]
+                given_roles = [role for role in person_obj.roles 
+                        if role.name not in role_orders[server_id]]
             except AttributeError as e:
                 pass
 
@@ -1047,7 +1105,8 @@ async def rank_time(context, *args):
                 try:
                     await bot.replace_roles(person_obj, rank_obj, *given_roles)
                 except discord.errors.Forbidden as e:
-                    logger.info(person_obj.name + ':' + person + 'Failed to update')
+                    logger.info('%s:%s : Failed to update' % 
+                            (person_obj.name, person))
 
                 # Update next role integer
                 if times[person][1] < len(role_orders[server_id]):
@@ -1062,7 +1121,8 @@ async def rank_time(context, *args):
             try:
                 try:
                     new_rank = role_orders[server_id][times[person][1]]
-                    new_rank_time = convert_time(server_configs[server_id][new_rank])
+                    new_rank_time = convert_time(
+                            server_configs[server_id][new_rank])
                     active_threads[server_id][person].next_rank = new_rank
                     active_threads[server_id][person].rank_time = new_rank_time
                 except IndexError as e:
@@ -1099,7 +1159,8 @@ async def rm_ranktime(context, *args):
 
     # Updates user's roles.
     else:
-        await on_server_role_delete(lambda role: role.name == rank, context.message.server.roles)
+        await on_server_role_delete(utils.find(lambda role: role.name == rank, 
+                context.message.server.roles))
         await bot.say('Done!')
 
 @bot.command(pass_context=True)
@@ -1128,7 +1189,8 @@ async def rm_usertime(context, *args):
     # If user is found, reset role integer and time to 0.
     else:
         times = global_member_times[server_id]
-        given_roles = [role for role in user.roles if role.name not in role_orders[server_id]]
+        given_roles = [role for role in user.roles 
+                if role.name not in role_orders[server_id]]
         times[user.id][0] = 0
         times[user.id][1] = 0
 
@@ -1165,7 +1227,8 @@ async def github(context):
         context (Context): Described in the discord.ext.commands API referece.
 
     """
-    embeder = Embed(colour=26575, type='rich', description=config['github_url'])
+    embeder = Embed(colour=_LINK_COLORS, type='rich', 
+            description=config['github_url'])
     await bot.send_message(context.message.channel, embed=embeder)
 
 @bot.command(pass_context=True)
@@ -1176,7 +1239,8 @@ async def donate(context):
         context (Context): Described in the discord.ext.commands API referece.
 
     """
-    embeder = Embed(colour=26575, type='rich', description=config['patreon'])
+    embeder = Embed(colour=_LINK_COLORS, type='rich', 
+            description=config['patreon'])
     await bot.send_message(context.message.channel, embed=embeder)
 
 
@@ -1197,43 +1261,44 @@ def stats_start(server):
             page. We populate global_member_times with this server.
 
     """
-    try:
 
-        # If stats text file does not yet exist for the server, create one and
-        # populate it along with the dictionary.
-        if not os.path.isfile(server.id + 'stats.txt'):
-            curr_stats = open(server.id + 'stats.txt', 'w')
-            global_member_times.update({server.id:dict()})
-            for member in server.members:
-                global_member_times[server.id].update({member.id:[0, 0]})
+    # If stats text file does not yet exist for the server, create one and
+    # populate it along with the dictionary.
+    if not os.path.isfile(server.id + 'stats.txt'):
+        open(server.id + 'stats.txt', 'w').close()
+        global_member_times.update({server.id:dict()})
+        for member in server.members:
+            global_member_times[server.id].update({member.id:[0, 0]})
 
-        # If stats text file has not been written to yet but exists, just fill
-        # in dictionary.
-        elif os.stat(server.id + 'stats.txt').st_size == 0:
-            global_member_times.update({server.id:dict()})
-            for member in server.members:
-                global_member_times[server.id].update({member.id:[0, 0]})
+    # If stats text file has not been written to yet but exists, just fill
+    # in dictionary.
+    elif os.stat(server.id + 'stats.txt').st_size == 0:
+        global_member_times.update({server.id:dict()})
+        for member in server.members:
+            global_member_times[server.id].update({member.id:[0, 0]})
 
-        # Otherwise read from text file to fill in dictionary.
-        else:
-            member_times = dict()
+    # Otherwise read from text file to fill in dictionary.
+    else:
+        member_times = dict()
+        try:
             curr_stats = open(server.id + 'stats.txt', 'r')
 
-            #begin to parse text file
+            # Split each user, value pair.
             readable = curr_stats.read().split(';')
-            for pair in readable:
-                member_id, time_and_rank = pair.split('=')
-                time_and_rank = time_and_rank.strip('[\n]')
-                time_and_rank = time_and_rank.split(', ')
-                time_and_rank[0] = int(float(time_and_rank[0]))
-                time_and_rank[1] = int(time_and_rank[1])
-                member_times.update({member_id:time_and_rank})
-            global_member_times.update({server.id:member_times})
+        except:
+            raise
+        finally:
+            curr_stats.close()
 
-    except:
-        raise
-    finally:
-        curr_stats.close()
+        # Begin parsing for user time and role integers.
+        for pair in readable:
+            member_id, time_and_rank = pair.split('=')
+            time_and_rank = time_and_rank.strip('[\n]')
+            time_and_rank = time_and_rank.split(', ')
+            time_and_rank[0] = int(float(time_and_rank[0]))
+            time_and_rank[1] = int(time_and_rank[1])
+            member_times.update({member_id:time_and_rank})
+        global_member_times.update({server.id:member_times})
 
 
 def config_start(server):
@@ -1249,10 +1314,9 @@ def config_start(server):
             page. We populate server_configs with this server.
 
     """
-    try:
-
-        # If file does not already exist, create one.
-        if not os.path.isfile(server.id + '.txt'):
+    # If file does not already exist, create one.
+    if not os.path.isfile(server.id + '.txt'):
+        try:
             curr_config = open(server.id + '.txt', 'w+')
 
             # _send_messages324906 is named as such to be unique from any
@@ -1261,19 +1325,24 @@ def config_start(server):
             # messages directly to the users involved.
             settings = {"_send_messages324906":True}
             curr_config.write("_send_messages324906=True")
+        except:
+            raise
+        finally:
+            curr_config.close()
 
-        # Otherwise a file exists so read from that into server_configs.
-        else:
+    # Otherwise a file exists so read from that into server_configs.
+    else:
+        try:
             curr_config = open(server.id + '.txt', 'r')
             readable = curr_config.read()
-            settings = dict(pair.split('=') for pair in readable.split(';'))
+        except:
+            raise
+        finally:
+            curr_config.close()
 
-        server_configs.update({server.id:settings})
+        settings = dict(pair.split('=') for pair in readable.split(';'))
 
-    except:
-        raise
-    finally:
-        curr_config.close()
+    server_configs.update({server.id:settings})
 
 
 def check_stats_presence(member):
@@ -1304,29 +1373,28 @@ def whitelist_start(server):
             page. We populate server_wl with this server.
 
     """
-    try:
+    # If file does not exist, create one.
+    if not os.path.isfile(server.id + 'wl.txt'):
+        open(server.id + 'wl.txt', 'w+').close()
+        people = list()
 
-        # If file does not exist, create one.
-        if not os.path.isfile(server.id + 'wl.txt'):
-            curr_wl = open(server.id + 'wl.txt', 'w+')
-            people = list()
+    # If file exists but is empty, just update the dictionary.
+    elif os.stat(server.id + 'wl.txt').st_size == 0:
+        server_wl.update({server.id:list()})
+        return
 
-        # If file exists but is empty, just update the dictionary.
-        elif os.stat(server.id + 'wl.txt').st_size == 0:
-            server_wl.update({server.id:list()})
-            return
-
-        # If file exists and is populated, parse its contents.
-        else:
+    # If file exists and is populated, parse its contents.
+    else:
+        try:
             curr_wl = open(server.id + 'wl.txt', 'r')
             people = curr_wl.read().split(';')
+        except:
+            raise
+        finally:
+            curr_wl.close()
 
-        server_wl.update({server.id:people})
+    server_wl.update({server.id:people})
 
-    except:
-        raise
-    finally:
-        curr_wl.close()
 
 def write_wl(server, person_id):
     """Writes newly whitelisted user to the server's whitelist text file.
@@ -1422,8 +1490,8 @@ def convert_time(time):
     """
     try:
         hours, minutes, seconds = time.split(':')
-        hours = int(hours) * 60 * 60
-        minutes = int(minutes) * 60
+        hours = int(hours) * _MINUTES * _SECONDS
+        minutes = int(minutes) * _SECONDS
         seconds = int(seconds)
         final_time = hours + minutes + seconds
         if final_time < 0:
@@ -1511,7 +1579,7 @@ def find_user(server, name_list):
             else:
                 username = username + ' ' + last_name
             to_list = utils.find((lambda person: person.name == username and
-                                    person.discriminator == discrim), server.members)
+                    person.discriminator == discrim), server.members)
 
             # Checks if found user.
             if to_list is None:
@@ -1520,7 +1588,7 @@ def find_user(server, name_list):
                 return to_list
         else:
             return None
-    except ValueError as e:
+    except (IndexError, ValueError) as e:
         return None
 
 
@@ -1534,9 +1602,9 @@ def convert_from_seconds(time):
         A tuple formatted as (hours, minutes, seconds) all as strings.
     """
     time = int(time)
-    seconds = (time % 60)
-    minutes = int(((time - seconds) / 60) % 60)
-    hours = int((time - (minutes * 60) - seconds) / 60 / 60)
+    seconds = (time % _SECONDS)
+    minutes = int(((time - seconds) / _SECONDS) % _MINUTES)
+    hours = int((time - (minutes * _MINUTES) - seconds) / _SECONDS / _MINUTES)
     return (str(hours), str(minutes), str(seconds))
 
 
@@ -1546,10 +1614,45 @@ def convert_from_seconds(time):
 
 
 class TimeTracker(threading.Thread):
-    """
+    """Threading class that tracks user time in voice channels.
+
+    This class is a means to track all user times seperatley while assigning
+    roles accordingly.
+
+    Attributes:
+        server (Server): Server object described in the Discord API reference.
+            Used to find out what server this user belongs to.
+
+        member (Member): Member object described in the Discord API reference.
+            This is the user to start the thread for.
+
+        member_time: Total time spent in the server's voice channels. Type can
+            be float or int.
+
+        bot_in_server (bool): True if bot is in the server. False otherwise.
+
+        stat_event (Event): Threading module's Event object to prevent race
+            conditions.
+
+        block_update (bool): Begins as False and constantly changes. Used
+            to try to prevent race conditions.
+
+        next_rank (int): Role integer of next role for user to attain.
+
+        rank_time (int): Time required to achieve next_rank.
+
     """
 
     def __init__(self, server, member):
+        """Initializes TimeTracker instance the specified user.
+
+        Args:
+            server (Server): Server object described in the Discord API 
+                reference. Used to find out what server this user belongs to.
+            member (Member): Member object described in the Discord API
+                reference. This is the user to start the thread for.
+
+        """
         super().__init__(daemon=True)
         times = global_member_times[server.id]
         self.server = server
@@ -1560,62 +1663,118 @@ class TimeTracker(threading.Thread):
         self.block_update = False
         try:
             self.next_rank = role_orders[server.id][times[member.id][1]]
-            self.rank_time = convert_time(server_configs[server.id][self.next_rank])
+            self.rank_time = convert_time(
+                    server_configs[server.id][self.next_rank])
+
+        # If user is already the highest role, set to None.
         except IndexError as e:
             self.rank_time = None
 
     def run(self):
+        """Starts thread to begin tracking user's time.
+
+        Also updates roles if user has reached a time milestone.
+
+        """
         now = time.time()
         times = global_member_times[self.server.id]
-        while (not self.member.voice.deaf and not self.member.voice.self_deaf and 
-                self.member.voice.voice_channel is not None 
-                and not self.member.voice.is_afk and self.bot_in_server):
+
+        # While the user is not deafened, not afk, and the bot is in the server.
+        while (not self.member.voice.deaf and 
+                not self.member.voice.self_deaf and 
+                self.member.voice.voice_channel is not None and 
+                not self.member.voice.is_afk and self.bot_in_server):
+
             times[self.member.id][0] = self.member_time + time.time() - now
+
+            # Other functions possibly updating some data, so wait for those to
+            # finish first.
             self.block_update = True
             self.stat_event.wait()
             self.block_update = False
+
+            # If the user is not whitelisted and has reached a time milestone.
             if (self.member.id not in server_wl[self.server.id] and 
                     self.rank_time is not None and 
                     self.member_time + time.time() >= self.rank_time + now):
-                given_roles = [role for role in self.member.roles if role.name not in role_orders[self.server.id]]
-                future = asyncio.run_coroutine_threadsafe(
-                        bot.replace_roles(self.member, utils.find(
-                        lambda role: role.name == self.next_rank
-                        , self.server.roles), *given_roles), bot.loop)
-                future.result()
+
+                given_roles = [role for role in self.member.roles 
+                        if role.name not in role_orders[self.server.id]]
+
+                try:
+                    # This is so we can update roles from this seperate thread 
+                    # which wouldn't be possible otherwise as replace_roles is 
+                    # a coroutine.
+                    future = asyncio.run_coroutine_threadsafe(
+                            bot.replace_roles(self.member, utils.find(
+                            lambda role: role.name == self.next_rank
+                            , self.server.roles), *given_roles), bot.loop)
+                    future.result()
+                except discord.errors.Forbidden as e:
+                    logger.error(str(e))
+
                 times[self.member.id][1] += 1
-                hours, minutes, seconds = convert_from_seconds(times[self.member.id][0])
+                hours, minutes, seconds = convert_from_seconds(
+                        times[self.member.id][0])
                 reciever = self.server.default_channel
                 fmt_tup = (self.member.mention, hours, minutes, seconds,
                                 self.next_rank)
                 message = ("Congratulations %s! You've spent a total of "
                             + "in %s hours, %s minutes, and %s seconds in this "
-                            + "servers' voice channels and have therefore "
+                            + "server's voice channels and have therefore "
                             + "earned the rank of %s! ") % fmt_tup
-                if (reciever is not None and reciever.type == ChannelType.text and
-                        bool(server_configs[self.server.id]["_send_messages324906"])):
+
+                # Sends to server's default text channel if evaluates true.
+                if (reciever is not None and 
+                        reciever.type == ChannelType.text and
+                        bool(server_configs[self.server.id]
+                        ["_send_messages324906"])):
+
                     future = asyncio.run_coroutine_threadsafe(
                             bot.send_message(reciever, message), bot.loop)
+
+                # Otherwise send message to the user that this thread belongs to
                 else:
                     future = asyncio.run_coroutine_threadsafe(
                             bot.send_message(self.member, message), bot.loop)
                 future.result()
+
+                # Prepare user's next role to reach.
                 try:
-                    self.next_rank = role_orders[self.server.id][times[self.member.id][1]]
-                    self.rank_time = convert_time(server_configs[self.server.id][self.next_rank])
+                    self.next_rank = (role_orders[self.server.id]
+                            [times[self.member.id][1]])
+                    self.rank_time = convert_time(
+                            server_configs[self.server.id][self.next_rank])
                     rank_time = self.rank_time + now
                 except IndexError as e:
                     self.rank_time = None
+
+                # Write updates to appropriate text file.
                 update_stats(self.server)
+
+            # Sleep thread for a few seconds for effeciency (not entirely sure 
+            # if this is the case, just intuition) since there are so
+            # many other threads running. 
             time.sleep(config['wait_time'])
 
 
 class PeriodicUpdater(threading.Thread):
+    """Updates stats.txt files periodically.
+
+    Writes updated user times and role integers to server files with stats.txt
+    extension. In hindsight, using 
+
+    """
 
     def __init__(self):
+        """Initializes thread."""
+
         super().__init__()
 
+
     def run(self):
+        """Constantly updates stats.txt files while the main thread is alive."""
+
         while threading.main_thread().is_alive():
             for server in bot.servers:
                 if server.id in config["server_blacklist"]:
@@ -1623,10 +1782,14 @@ class PeriodicUpdater(threading.Thread):
                 try:
                     update_stats(server)
                 except KeyError as error:
-                    logger.info(server.name + ''.join(traceback.format_exception(
-                                type(error), error, error.__traceback__)))
+                    logger.info(server.name + ''.join(
+                            traceback.format_exception(
+                            type(error), error, error.__traceback__)))
                     continue
+
+            # Sleep thread to consume less cpu cycles.
             time.sleep(config['sleep_time'])
+
         logging.shutdown()
 
-bot.run(config['token'])
+bot.run(config['test_token'])
