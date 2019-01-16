@@ -126,6 +126,11 @@ server_wl = dict()
 server_events = dict()
 active_threads = dict()
 bot.remove_command('help')
+
+# Used for determining if user should be notified on role update.
+# This is needed for a fatal edge case.
+message_user = True
+
 with open('config.json', 'r') as file:
     config = json.load(file)
 
@@ -188,6 +193,7 @@ async def on_server_join(server):
         check_stats_presence(person) 
 
     # Start TimeTrackers threads for people in voice channels.
+    message_user = False
     for channel in server.channels:
         for person in channel.voice_members:
             m_voice = person.voice
@@ -197,6 +203,7 @@ async def on_server_join(server):
                 new_thread = TimeTracker(server, person)
                 new_thread.start()
                 active_threads[server.id].update({person.id:new_thread})
+    message_user = True
 
 @bot.event
 async def on_server_remove(server):
@@ -1714,30 +1721,35 @@ class TimeTracker(threading.Thread):
                     logger.error(str(e))
 
                 times[self.member.id][1] += 1
-                hours, minutes, seconds = convert_from_seconds(
-                        times[self.member.id][0])
-                reciever = self.server.default_channel
-                fmt_tup = (self.member.mention, hours, minutes, seconds,
-                                self.next_rank)
-                message = ("Congratulations %s! You've spent a total of "
-                            + "in %s hours, %s minutes, and %s seconds in this "
-                            + "server's voice channels and have therefore "
-                            + "earned the rank of %s! ") % fmt_tup
 
-                # Sends to server's default text channel if evaluates true.
-                if (reciever is not None and 
-                        reciever.type == ChannelType.text and
-                        bool(server_configs[self.server.id]
-                        ["_send_messages324906"])):
+                if(message_user):
 
-                    future = asyncio.run_coroutine_threadsafe(
-                            bot.send_message(reciever, message), bot.loop)
+                    hours, minutes, seconds = convert_from_seconds(
+                            times[self.member.id][0])
+                    reciever = self.server.default_channel
+                    fmt_tup = (self.member.mention, hours, minutes, seconds,
+                                    self.next_rank)
+                    message = ("Congratulations %s! You've spent a total of "
+                                + "in %s hours, %s minutes, and %s seconds in "
+                                + "this server's voice channels and have "
+                                + "therefore earned the rank of %s!") % fmt_tup
 
-                # Otherwise send message to the user that this thread belongs to
-                else:
-                    future = asyncio.run_coroutine_threadsafe(
-                            bot.send_message(self.member, message), bot.loop)
-                future.result()
+                    # Sends to server's default text channel if evaluates true.
+                    if (reciever is not None and 
+                            reciever.type == ChannelType.text and
+                            bool(server_configs[self.server.id]
+                            ["_send_messages324906"])):
+
+                        future = asyncio.run_coroutine_threadsafe(
+                                bot.send_message(reciever, message), bot.loop)
+
+                    # Otherwise send message to the user that this thread belongs 
+                    # to
+                    else:
+                        future = asyncio.run_coroutine_threadsafe(
+                                bot.send_message(self.member, message), 
+                                bot.loop)
+                    future.result()
 
                 # Prepare user's next role to reach.
                 try:
