@@ -361,6 +361,9 @@ async def on_server_role_delete(role):
     for person in (set(times.keys()) - set(server_wl[server_id])):
         person_obj = utils.find(lambda member: member.id == person,
                                 role.server.members)
+        if person_obj == None:
+            logger.error("%s: person_obj evaluated to None: %s" % 
+                    (role.server.id, person))
 
         # given_roles is a list of a user's roles that do not have a time
         # milestone associated with them. These should be returned to the user.
@@ -918,6 +921,11 @@ async def rank_time(context, *args):
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
 
+            if person_obj == None:
+                logger.error("%s: person_obj evaluated to None: %s" % 
+                        (context.message.server.id, person))
+                continue
+
             try:
 
                 # Get all roles without time milestones associated with them.
@@ -1160,9 +1168,9 @@ async def rm_ranktime(context, *args):
     server = context.message.server
     rank = ' '.join(args)
     if rank not in role_orders[server.id]:
-        bot.say('Cannot find rank with the name %s.'
+        bot.say('Cannot find rank with the name %s.' % rank
                 + 'Usage: `~rm_ranktime [role_name]`\n'
-                + 'Example: ```~rm_ranktime A Cool Role```' % rank)
+                + 'Example: ```~rm_ranktime A Cool Role```')
 
     # Updates user's roles.
     else:
@@ -1299,12 +1307,16 @@ def stats_start(server):
 
         # Begin parsing for user time and role integers.
         for pair in readable:
-            member_id, time_and_rank = pair.split('=')
-            time_and_rank = time_and_rank.strip('[\n]')
-            time_and_rank = time_and_rank.split(', ')
-            time_and_rank[0] = int(float(time_and_rank[0]))
-            time_and_rank[1] = int(time_and_rank[1])
-            member_times.update({member_id:time_and_rank})
+            try:
+                member_id, time_and_rank = pair.split('=')
+                time_and_rank = time_and_rank.strip('[\n]')
+                time_and_rank = time_and_rank.split(', ')
+                time_and_rank[0] = int(float(time_and_rank[0]))
+                time_and_rank[1] = int(time_and_rank[1])
+                member_times.update({member_id:time_and_rank})
+            except ValueError as e:
+                logger.error("Hex values in %s" % server.id)
+                
         global_member_times.update({server.id:member_times})
 
 
@@ -1764,11 +1776,6 @@ class TimeTracker(threading.Thread):
                 # Write updates to appropriate text file.
                 update_stats(self.server)
 
-            # Sleep thread for a few seconds for effeciency (not entirely sure 
-            # if this is the case, just intuition) since there are so
-            # many other threads running. 
-            time.sleep(config['wait_time'])
-
 
 class PeriodicUpdater(threading.Thread):
     """Updates stats.txt files periodically.
@@ -1799,9 +1806,6 @@ class PeriodicUpdater(threading.Thread):
                             type(error), error, error.__traceback__)))
                     continue
 
-            # Sleep thread to consume less cpu cycles.
-            time.sleep(config['sleep_time'])
-
         logging.shutdown()
 
-bot.run(config['test_token'])
+bot.run(config['token'])
