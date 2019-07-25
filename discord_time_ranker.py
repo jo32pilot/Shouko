@@ -10,6 +10,9 @@ Example:
 
 
 Attributes:
+    
+    sql (SQLWrapper) Wrapper for sql python connector.
+    
     bot (Bot): The bot object running on each server.
 
     server_configs (dict): Holds (server_id, dict) pairs where 
@@ -48,8 +51,8 @@ Attributes:
         know where each role stands in the heirarchy and can represent each
         person's role as an integer
 
-    server_wl (dict): Holds (server_id, list) pairs where server_id indicates
-        what server the list value belongs to. The list holds whitelisted 
+    server_wl (dict): Holds (server_id, set) pairs where server_id indicates
+        what server the list value belongs to. The set holds whitelisted 
         user_ids for their server. A whitelisted user will not be affected
         by automatic roll assigning but will still accumulate time for staying
         in voice channels. Whitelisted users can be manually assigned roles
@@ -86,6 +89,7 @@ from discord import utils
 from discord import Embed
 from discord.ext import commands
 from discord.ext.commands import Bot
+from sql_wrapper import SQLWrapper
 
 #------------CONSTANTS------------#
 
@@ -104,6 +108,11 @@ _MAX_BOARD_SIZE = 15          # Maximum amount of people to be shown on a
 _SECONDS = 60                 # Seconds in a minute.
 _MINUTES = 60                 # Minutes in an hour.
 
+_ID_INDEX = 0                 # Index of returned sql row where user id is
+_TIME_INDEX = 1               # Index of returned sql row where user time is
+_RANK_INDEX = 2               # Index of returned sql row where rank is
+_WL_STATUS_INDEX = 3          # Index of returned sql row where wl_status is
+
 #------------LOGGING------------#
 
 #Sets up logging. Template taken from 
@@ -113,11 +122,16 @@ logger.setLevel(logging.INFO)
 handler = logging.FileHandler(filename='discord.log'
                             , encoding='utf-8', mode='w')
 handler.setFormatter(
-        logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+        logging.Formatter('%(asctime)s:%(levelname)s:%(module)s:%(lineno)d: '
+                            + '%(message)s'))
 logger.addHandler(handler)
 
 #------------SETTUP / ATTRIBUTES------------#
 
+with open('config.json', 'r') as file:
+    config = json.load(file)
+
+sql = SQLWrapper(config.db_config)
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
 global_member_times = dict()
@@ -130,9 +144,6 @@ bot.remove_command('help')
 # Used for determining if user should be notified on role update.
 # This is needed for a fatal edge case.
 message_user = True
-
-with open('config.json', 'r') as file:
-    config = json.load(file)
 
 #------------EVENTS------------#
 # NOTE: All event function headers are explained in the reference for the 
@@ -151,7 +162,7 @@ async def on_ready():
         await bot.on_server_join(server)
 
     PeriodicUpdater().start()
-    await bot.change_presence(game=Game(name='on a ferris wheel | ~help'))
+    await bot.change_presence(game=Game(name='#KyoaniStrong | ~help'))
     logger.info(str(server_configs))
 
 
@@ -166,14 +177,6 @@ async def on_server_join(server):
 
     """
 
-    # On servers with 2500 or more members (not a definitive lower bound, could 
-    # be more or less) the files begin to get written with hexdecimal values in
-    # odd places. This renders my method of parsing text files useless so I
-    # have to blacklist those servers. Plan to move config and stats to a 
-    # database to alleviate this problem.
-    if server.id in config["server_blacklist"]:
-        return
-
     if server.name is not None:
         logger.info('Joining server ' + server.name)
 
@@ -181,7 +184,6 @@ async def on_server_join(server):
     stats_start(server)
     config_start(server)
     role_orders.update({server.id:get_roles_in_order(server)})
-    whitelist_start(server)
     active_threads.update({server.id:dict()})
     stat_event = threading.Event()
     stat_event.set()
@@ -273,8 +275,6 @@ async def on_voice_state_update(before, after):
 
 @bot.event
 async def on_member_join(member):
-    if member.server.id in config["server_blacklist"]:
-        return
     check_stats_presence(member) 
 
 @bot.event
@@ -288,9 +288,6 @@ async def on_server_role_create(role):
     them in how to activate the failsafe in the event that the bot does break.
         
     """
-    if role.server.id in config["server_blacklist"]:
-        return
-
     reciever = role.server.default_channel
 
     # Checks if at least two ranks have the same name but have a different id.
@@ -331,8 +328,6 @@ async def on_server_role_delete(role):
         
     """
     server_id = role.server.id
-    if server_id in config["server_blacklist"]:
-        return
 
     # If role didn't have a time associated with it, don't do anything.
     if role.name not in server_configs[server_id]:
@@ -358,7 +353,7 @@ async def on_server_role_delete(role):
 
     # Looping over the difference in the two sets to ignore people on the
     # whitelist.
-    for person in (set(times.keys()) - set(server_wl[server_id])):
+    for person in (set(times.keys()) - server_wl[server_id]):
         person_obj = utils.find(lambda member: member.id == person,
                                 role.server.members)
         if person_obj == None:
@@ -447,12 +442,8 @@ async def on_command_error(error, context):
                             + ". Checkout out the ~help command and try again!")
 
     elif isinstance(error, commands.CheckFailure):
-        if context.message.server.id in config['server_blacklist']:
-            await bot.send_message(channel, "Commands cannot be done in this" 
-                    + "server due to complications.")
-        else:
-            await bot.send_message(channel, "You're missing role managing"
-                  + "permissions!")
+        await bot.send_message(channel, "You're missing role managing"
+              + "permissions!")
 
     else:
         embeder = Embed(type='rich', description="Sorry! I ran into an error. "
@@ -464,23 +455,6 @@ async def on_command_error(error, context):
         logger.error(context.message.content + '\n' + 
                 ''.join(traceback.format_exception(type(error), error, 
                 error.__traceback__)))
-
-
-#------------CHECKS------------#
-# NOTE: All parameters named "context" are explained in the 
-# discord.ext.commands API reference.
-
-
-def check_server(context):
-    """Checks if server is blacklisted.
-    
-    Used with the discord.ext.commands module's check decorator.
-
-    Args:
-        context (Context): Described in the discord.ext.commands API referece.
-
-    """
-    return context.message.channel.server.id not in config["server_blacklist"]
 
 
 #------------COMMANDS------------#
@@ -659,8 +633,8 @@ async def whitelist(context, *name):
         await bot.say('Member is already on the whitelist.')
 
     else:
-        server_wl[server.id].append(to_list.id)
-        write_wl(server, to_list.id)
+        server_wl[server.id].add(to_list.id)
+        sql.whitelist_user(server.id, to_list.id)
         await bot.say('Whitelist successful!')
 
 @bot.command(pass_context=True)
@@ -716,15 +690,7 @@ async def unwhitelist(context, *name):
         except (AttributeError, KeyError) as exc:
             pass
 
-        # Update server's text file whitelist
-        with open(server.id + 'wl.txt', 'w+') as wl_file:
-            try:
-                wl_file.write(server_wl[server.id][0])
-                for person in server_wl[server.id][1:]:
-                    wl_file.write(';' + person)
-            except IndexError as e:
-                return
-
+        sql.unwhitelist_user(server.id, to_list.id)
         await bot.say('Member has been removed from the whitelist! Rank '
                         + 'should be given back after rejoining a voice '
                         + 'channel if not already returned.')
@@ -741,20 +707,8 @@ async def whitelist_all(context):
     """
     server = context.message.server
     # Update server_wl dictionary.
-    for person in server:
-        if person not in server_wl[server.id]:
-            server_wl[server.id].append(person.id)
-
-    # Update server's text file whitelist.
-    with open(server.id + 'wl.txt', 'w+') as wl_file:
-        try:
-            wl_file.write(server[server.id][0])
-            for person in server_wl[server.id][1:]:
-                wl_write.write(';' + person)
-        except IndexError as e:
-            await bot.say('Done!')
-            return
-
+    server_wl[server.id] = {member for member in global_member_times[server.id]}
+    sql.whitelist_all(server.id)
     await bot.say('Done!')
 
 @bot.command(pass_context=True)
@@ -770,7 +724,7 @@ async def unwhitelist_all(context):
     # Almost the same as the unwhitelist command but for everyone.
     server = context.message.server
     times = global_member_times[server.id]
-    server_wl[server.id].clear()
+    server_wl[server.id] = set()
     for person in times:
         times[person][1] = 0
         try:
@@ -784,7 +738,7 @@ async def unwhitelist_all(context):
                 active_threads[server.id][person].rank_time = None
         except (AttributeError, KeyError) as exc:
             pass
-    open(server.id + 'wl.txt' , 'w').close()
+    sql.unwhitelist_all(server.id)
     await bot.say('Done!')
 
 @bot.command(pass_context=True)
@@ -917,7 +871,7 @@ async def rank_time(context, *args):
                 context.message.server.roles)
 
         # For all people not on the whitelist
-        for person in (set(times.keys()) - set(server_wl[server_id])):
+        for person in (set(times.keys()) - server_wl[server_id]):
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
 
@@ -1094,7 +1048,7 @@ async def rank_time(context, *args):
                 context.message.server.roles)
 
         # For everyone not on the whitelist
-        for person in (set(times.keys()) - set(server_wl[server_id])):
+        for person in (set(times.keys()) - server_wl[server_id]):
             person_obj = utils.find(lambda member: member.id == person,
                                     context.message.server.members)
 
@@ -1265,59 +1219,40 @@ async def donate(context):
 
 
 def stats_start(server):
-    """Fills in global_member_times dictionary.
+    """Fills in global_member_times and server_wl dictionaries.
     
-    Creates new text files with user ids and their associated role
-    integers and times for new servers. Otherwise, just populate
-    globabl_member_times with the server's users and their stats.
+        Creates and populates a table in the database if no such table exists
+        for this server.
 
     Args:
         server (Server): Server object described in the Discord API reference
             page. We populate global_member_times with this server.
 
     """
+    member_times = {}
+    server_wl[server.id] = set()
+    results = sql.fetch_all(server.id)
 
-    # If stats text file does not yet exist for the server, create one and
-    # populate it along with the dictionary.
-    if not os.path.isfile(server.id + 'stats.txt'):
-        open(server.id + 'stats.txt', 'w').close()
-        global_member_times.update({server.id:dict()})
+    # Table didn't exist. Create it
+    if results == None:
+        vals = []
         for member in server.members:
-            global_member_times[server.id].update({member.id:[0, 0]})
+            vals.append((member,))
+            member_times[member.id] = [0, 0]
+        sql.create_table(server.id, vals)
 
-    # If stats text file has not been written to yet but exists, just fill
-    # in dictionary.
-    elif os.stat(server.id + 'stats.txt').st_size == 0:
-        global_member_times.update({server.id:dict()})
-        for member in server.members:
-            global_member_times[server.id].update({member.id:[0, 0]})
-
-    # Otherwise read from text file to fill in dictionary.
+    # Otherwise use the results to populate global_member_times
     else:
-        member_times = dict()
-        try:
-            curr_stats = open(server.id + 'stats.txt', 'r')
+        for result in results:
+            user_id = result[_ID_INDEX]
+            time = result[_TIME_INDEX]
+            rank = result[_RANK_INDEX]
+            if result[_WL_STATUS_INDEX] == True:
+                server_wl[server.id].add(user_id)
+            member_times[user_id] = [time, rank]
+    global_member_times[server.id] = member_times
+    
 
-            # Split each user, value pair.
-            readable = curr_stats.read().split(';')
-        except:
-            raise
-        finally:
-            curr_stats.close()
-
-        # Begin parsing for user time and role integers.
-        for pair in readable:
-            try:
-                member_id, time_and_rank = pair.split('=')
-                time_and_rank = time_and_rank.strip('[\n]')
-                time_and_rank = time_and_rank.split(', ')
-                time_and_rank[0] = int(float(time_and_rank[0]))
-                time_and_rank[1] = int(time_and_rank[1])
-                member_times.update({member_id:time_and_rank})
-            except ValueError as e:
-                logger.error("Hex values in %s" % server.id)
-                
-        global_member_times.update({server.id:member_times})
 
 
 def config_start(server):
@@ -1379,59 +1314,6 @@ def check_stats_presence(member):
     if member.id not in global_member_times[server_id]:
         global_member_times[server_id].update({member.id:[0, 0]})
 
-
-def whitelist_start(server):
-    """Fills in server_wl dictionary.
-
-    Creates new text file for whitelisted users in the server if a text file 
-    does not yet exist. If a text file already exists, the function reads from
-    the existing text file to fill in server_wl.
-
-    Args:
-        server (Server): Server object described in the Discord API reference
-            page. We populate server_wl with this server.
-
-    """
-    # If file does not exist, create one.
-    if not os.path.isfile(server.id + 'wl.txt'):
-        open(server.id + 'wl.txt', 'w+').close()
-        people = list()
-
-    # If file exists but is empty, just update the dictionary.
-    elif os.stat(server.id + 'wl.txt').st_size == 0:
-        server_wl.update({server.id:list()})
-        return
-
-    # If file exists and is populated, parse its contents.
-    else:
-        try:
-            curr_wl = open(server.id + 'wl.txt', 'r')
-            people = curr_wl.read().split(';')
-        except:
-            raise
-        finally:
-            curr_wl.close()
-
-    server_wl.update({server.id:people})
-
-
-def write_wl(server, person_id):
-    """Writes newly whitelisted user to the server's whitelist text file.
-
-    Args:
-        server (Server): Server object described in the Discord API reference
-            page. We get the unique id of the server from this object.
-        person_id (string): Whitelisted user's unique id.
-
-    """
-    with open(server.id + 'wl.txt', 'a') as curr_wl:
-
-        # First if statement accounts for adding the first person to the
-        # file. This is so we can parse the file correctly.
-        if os.stat(server.id + 'wl.txt').st_size == 0:
-            curr_wl.write(person_id)
-        else:
-            curr_wl.write(';' + person_id)
 
 def change_config(server_id, option, value):
     """Changes a server's configuration for an option.
@@ -1778,10 +1660,10 @@ class TimeTracker(threading.Thread):
 
 
 class PeriodicUpdater(threading.Thread):
-    """Updates stats.txt files periodically.
+    """Updates database periodically.
 
     Writes updated user times and role integers to server files with stats.txt
-    extension. In hindsight, using 
+    extension.
 
     """
 
@@ -1808,4 +1690,4 @@ class PeriodicUpdater(threading.Thread):
 
         logging.shutdown()
 
-bot.run(config['token'])
+bot.run(config['test_token'])

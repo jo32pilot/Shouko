@@ -9,6 +9,6 @@
 !LICENSE
 !README.md
 !backup.py
-!discordTimeRanker.py
+!discord_time_ranker.py
 !exampleConfig.json
-!SQLWrapper.py
+!sql_wrapper.py
