@@ -84,6 +84,7 @@ import os.path
 import discord
 import traceback
 import threading
+from signal import *
 from discord import Game
 from discord import utils
 from discord import Embed
@@ -131,7 +132,10 @@ logger.addHandler(handler)
 with open('config.json', 'r') as file:
     config = json.load(file)
 
-sql = SQLWrapper(config.db_config)
+for sig in (SIGINT, SIGTERM):
+    signal(sig, clean_up)
+
+sql = SQLWrapper(config["db_config"])
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
 global_member_times = dict()
@@ -217,11 +221,6 @@ async def on_server_remove(server):
     """
     logger.info('Leaving server ' + server.name)
 
-    # Don't do anything if leaving a blacklisted server, no values were created
-    # in the first place.
-    if server.id in config["server_blacklist"]:
-        return
-
     # Deletion of dictionary values.
     try:
         del global_member_times[server.id]
@@ -250,8 +249,6 @@ async def on_voice_state_update(before, after):
     Otherwise, as long as the user is in a voice channel, accumulate time.
     
     """
-    if before.server.id in config["server_blacklist"]:
-        return
 
     # Check if user is not deafened or afk and in a voice channel.
     if (after.voice.voice_channel is not None and not after.voice.is_afk
@@ -1313,6 +1310,7 @@ def check_stats_presence(member):
     server_id = member.server.id
     if member.id not in global_member_times[server_id]:
         global_member_times[server_id].update({member.id:[0, 0]})
+        sql.add_user(server_id, member.id)
 
 
 def change_config(server_id, option, value):
@@ -1428,24 +1426,6 @@ def get_roles_in_order(server):
     return sorted(to_sort, key=to_sort.get)
 
 
-def update_stats(server):
-    """Writes updated user times to the appropriate text file.
-
-    Args:
-        server (Server): Server object described in the Discord API reference
-            page. We get the unique id of the server from this object.
-
-    """
-    with open(server.id + 'stats.txt', 'w') as stats:
-        server_times = global_member_times[server.id]
-
-        # blank and semi_colon are so we can parse the file correctly.
-        blank = ''
-        semi_colon = ';'
-        for key in list(server_times.keys()):
-            stats.write(blank + key + '=' + str(server_times[key]))
-            blank = semi_colon
-
 
 def find_user(server, name_list):
     """Parses list for a username and finds that user.
@@ -1508,7 +1488,15 @@ def convert_from_seconds(time):
     hours = int((time - (minutes * _MINUTES) - seconds) / _SECONDS / _MINUTES)
     return (str(hours), str(minutes), str(seconds))
 
+def clean_up():
+    """Ends extra threads before exiting program."""
+    for server in active_threads:
+        sql.update_server(server, global_member_times[server])
+        for member in active_threads[server]:
+            if active_threads[server].get(member) != None:
+                active_threads[server][member].bot_in_server = False
 
+    time.sleep(config["wait_time"])
 
 #------------THREADING CLASSES------------#
 
@@ -1554,7 +1542,7 @@ class TimeTracker(threading.Thread):
                 reference. This is the user to start the thread for.
 
         """
-        super().__init__(daemon=True)
+        super().__init__()
         times = global_member_times[server.id]
         self.server = server
         self.member = member
@@ -1615,6 +1603,9 @@ class TimeTracker(threading.Thread):
                     logger.error(str(e))
 
                 times[self.member.id][1] += 1
+                time = times[self.member.id][0]
+                rank = times[self.member.id][1]
+                sql.update_user(self.server.id, self.member.id, time, rank)
 
                 if(message_user):
 
@@ -1655,15 +1646,11 @@ class TimeTracker(threading.Thread):
                 except IndexError as e:
                     self.rank_time = None
 
-                # Write updates to appropriate text file.
-                update_stats(self.server)
-
 
 class PeriodicUpdater(threading.Thread):
     """Updates database periodically.
 
-    Writes updated user times and role integers to server files with stats.txt
-    extension.
+    Writes updated user times and role integers to database
 
     """
 
@@ -1678,15 +1665,8 @@ class PeriodicUpdater(threading.Thread):
 
         while threading.main_thread().is_alive():
             for server in bot.servers:
-                if server.id in config["server_blacklist"]:
-                    continue
-                try:
-                    update_stats(server)
-                except KeyError as error:
-                    logger.info(server.name + ''.join(
-                            traceback.format_exception(
-                            type(error), error, error.__traceback__)))
-                    continue
+                sql.update_server(server.id, global_member_times[server.id])
+            time.sleep(config["sleep_time"])
 
         logging.shutdown()
 

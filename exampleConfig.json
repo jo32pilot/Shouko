@@ -10,13 +10,9 @@
         "host": "YOUR_HOST_HERE"
     },
 
-    "server_blacklist":[],
+    "sleep_time":300,
 
-    "to_leave":2500,
-
-    "sleep_time":5,
-
-    "wait_time":0,
+    "wait_time":5,
 
     "settup":["`~settup`","Displays your server's ranking settup."],
 
