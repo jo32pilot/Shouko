@@ -132,9 +132,6 @@ logger.addHandler(handler)
 with open('config.json', 'r') as file:
     config = json.load(file)
 
-for sig in (SIGINT, SIGTERM):
-    signal(sig, clean_up)
-
 sql = SQLWrapper(config["db_config"])
 bot = Bot(command_prefix='~', case_insensitve=True)
 server_configs = dict()
@@ -394,6 +391,8 @@ async def on_server_role_delete(role):
                 logger.info('%s:%s : Exception Occured' % 
                         (person_obj.name, person))
             times[person][1] -= 1
+            sql.update_user(role.server.id, person, 
+                    times[person][0], times[person][1])
         
         # User might have a role with higher time milestone than the one being
         # removed. If so, just update underlying ranking structure to represent
@@ -401,6 +400,8 @@ async def on_server_role_delete(role):
         elif (times[person][1] > 0 and curr_rank is not None and
                 role_index < curr_rank_pos):
             times[person][1] -= 1
+            sql.update_user(role.server.id, person, 
+                    times[person][0], times[person][1])
 
         # Attempts to update some TimeTracker fields which are needed to update
         # roles properly.
@@ -488,7 +489,6 @@ async def help(context, *cmd):
     await bot.send_message(context.message.channel, embed=embeder)
 
 @bot.command(pass_context=True)
-@commands.check(check_server)
 async def settup(context):
     """Sends server's settup to view.
 
@@ -513,7 +513,6 @@ async def settup(context):
     logger.debug(embeder.fields)
 
 @bot.command(pass_context=True)
-@commands.check(check_server)
 async def my_time(context):
     """Tells users their total time spent in the server's voice channels.
 
@@ -523,15 +522,14 @@ async def my_time(context):
     """
     try:
         times = global_member_times[context.message.server.id]
-        time = convert_from_seconds(times[context.message.author.id][0])
-        await bot.say('%s Hours, %s Minutes, %s Seconds' % time)
+        curr_time = convert_from_seconds(times[context.message.author.id][0])
+        await bot.say('%s Hours, %s Minutes, %s Seconds' % curr_time)
     except KeyError as e:
         await bot.say('You haven\'t entered a voice channel in this server '
                 + 'since you last joined it! Join a voice channel to recieve '
                 + 'your time.')
 
 @bot.command(pass_context=True)
-@commands.check(check_server)
 async def leaderboard(context, amount):
     """Lists users with the most time spent in voice channels in the server.
 
@@ -595,7 +593,6 @@ async def leaderboard(context, amount):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def whitelist(context, *name):
     """Adds users to a whitelist for their server.
 
@@ -636,7 +633,6 @@ async def whitelist(context, *name):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def unwhitelist(context, *name):
     """Removes a user from the server's whitelist.
 
@@ -694,7 +690,6 @@ async def unwhitelist(context, *name):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def whitelist_all(context):
     """Adds all users on the server to the whitelist.
 
@@ -710,7 +705,6 @@ async def whitelist_all(context):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def unwhitelist_all(context):
     """Remove all users from the server's whitelist.
 
@@ -739,7 +733,6 @@ async def unwhitelist_all(context):
     await bot.say('Done!')
 
 @bot.command(pass_context=True)
-@commands.check(check_server)
 async def list_whitelist(context):
     """Lists all people on the server's whitelist.
 
@@ -758,7 +751,6 @@ async def list_whitelist(context):
 
 @bot.command(name='cleanslate', pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def clean_slate(context):
     """Reset underlying role system for the server.
 
@@ -781,7 +773,6 @@ async def clean_slate(context):
 
 @bot.command(name='ranktime', pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def rank_time(context, *args):
     """Attaches a time milestone to a role.
 
@@ -925,6 +916,8 @@ async def rank_time(context, *args):
                 if (times[person][1] < len(role_orders[server_id]) and 
                         rank_before_new > curr_rank_pos):
                     times[person][1] += 1
+                    sql.update_user(server_id, person, 
+                            times[person][0], times[person][1])
 
             # We allow roles with existing time milestones to change as well. 
             # This elif accounts for that.
@@ -958,6 +951,8 @@ async def rank_time(context, *args):
 
                     # Update user's next role to attain.
                     times[person][1] -= 1
+                    sql.update_user(server_id, person, 
+                            times[person][0], times[person][1])
 
                 # If the updated role is now below a role it was previously
                 # above, that means the user should recieve the previous
@@ -998,6 +993,8 @@ async def rank_time(context, *args):
                         rank_before_new < curr_rank_pos and
                         rank_after_new >= curr_rank_pos):
                     times[person][1] -= 1
+                    sql.update_user(server_id, person, 
+                            times[person][0], times[person][1])
 
                 # The reverse. If the updated role was previously above
                 # the user's role but is now below the user's role and the
@@ -1008,6 +1005,8 @@ async def rank_time(context, *args):
                         rank_before_new > curr_rank_pos and 
                         rank_after_new <= curr_rank_pos):
                     times[person][1] += 1
+                    sql.update_user(server_id, person, 
+                            times[person][0], times[person][1])
 
             # Update TimeTracker thread fields.
             try:
@@ -1077,11 +1076,15 @@ async def rank_time(context, *args):
                 # Update next role integer
                 if times[person][1] < len(role_orders[server_id]):
                     times[person][1] += 1
+                    sql.update_user(server_id, person, times[person][0], 
+                            times[person][1])
 
             # Otherwise, if the role is below the user's current role, just 
             # update next role integer.
             elif curr_rank is not None and rank_after_new < curr_rank_pos:
                 times[person][1] += 1
+                sql.update_user(server_id, person, times[person][0], 
+                        times[person][1])
 
             # Update TimeTracker thread fields if it exists.
             try:
@@ -1101,7 +1104,6 @@ async def rank_time(context, *args):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def rm_ranktime(context, *args):
     """Removes a time milestone from the specified role.
 
@@ -1131,7 +1133,6 @@ async def rm_ranktime(context, *args):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def rm_usertime(context, *args):
     """Resets a user's total time to 0 seconds.
 
@@ -1173,7 +1174,6 @@ async def rm_usertime(context, *args):
 
 @bot.command(pass_context=True)
 @commands.has_permissions(manage_roles=True)
-@commands.check(check_server)
 async def toggle_messages(context):
     """Updates _send_messages324906 (determines where to send certain messages).
 
@@ -1234,7 +1234,7 @@ def stats_start(server):
     if results == None:
         vals = []
         for member in server.members:
-            vals.append((member,))
+            vals.append((member.id,))
             member_times[member.id] = [0, 0]
         sql.create_table(server.id, vals)
 
@@ -1488,15 +1488,21 @@ def convert_from_seconds(time):
     hours = int((time - (minutes * _MINUTES) - seconds) / _SECONDS / _MINUTES)
     return (str(hours), str(minutes), str(seconds))
 
-def clean_up():
-    """Ends extra threads before exiting program."""
+def clean_up(sig_num, stack_frame):
+    """Ends extra threads before exiting program.
+
+    Arguments are documented in Python's official documentation.
+    """
     for server in active_threads:
         sql.update_server(server, global_member_times[server])
         for member in active_threads[server]:
             if active_threads[server].get(member) != None:
                 active_threads[server][member].bot_in_server = False
-
+    logging.shutdown()
     time.sleep(config["wait_time"])
+
+for sig in (SIGINT, SIGTERM):
+    signal(sig, clean_up)
 
 #------------THREADING CLASSES------------#
 
@@ -1603,9 +1609,9 @@ class TimeTracker(threading.Thread):
                     logger.error(str(e))
 
                 times[self.member.id][1] += 1
-                time = times[self.member.id][0]
+                curr_time = times[self.member.id][0]
                 rank = times[self.member.id][1]
-                sql.update_user(self.server.id, self.member.id, time, rank)
+                sql.update_user(self.server.id, self.member.id, curr_time, rank)
 
                 if(message_user):
 
@@ -1657,7 +1663,7 @@ class PeriodicUpdater(threading.Thread):
     def __init__(self):
         """Initializes thread."""
 
-        super().__init__()
+        super().__init__(daemon=True)
 
 
     def run(self):
@@ -1667,7 +1673,5 @@ class PeriodicUpdater(threading.Thread):
             for server in bot.servers:
                 sql.update_server(server.id, global_member_times[server.id])
             time.sleep(config["sleep_time"])
-
-        logging.shutdown()
 
 bot.run(config['test_token'])

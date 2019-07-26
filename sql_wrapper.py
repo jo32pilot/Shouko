@@ -3,12 +3,13 @@ Defines wrapper class for sql python connector.
 
 """
 
+import logging
 from mysql import connector
 from mysql.connector.pooling import MySQLConnectionPool
 
 connector.threadsafety = 1
-logger = getLogger("discord")
-_POOL_SIZE = 100
+logger = logging.getLogger("discord")
+_POOL_SIZE = 32
 
 
 class SQLWrapper():
@@ -60,61 +61,38 @@ class SQLWrapper():
         cursor.close()
         cnx.close()
 
-    def _update_query(f):
-        """Decorator to help execuate database updates
+    def _update_query(self, query, *args):
+        """Helper to execuate database updates
             
         Args:
-            f (function): Function that returns an sql query as a string.
+            query (string): Query to execute.
 
-        Returns:
-            function: Function that executes the query.
         """
-        def query_execute(*args):
-            """Executes database queries
+        cnx = self._get_connection()
+        cursor = cnx.cursor()
+        cursor.execute(query, args)
+        self._clean_up(cnx, cursor)
 
-            Args:
-                *args: Variable length parameter list with query information.
-                
-            """
-            cnx = args[0]._get_connection()
-            cursor = cnx.cursor()
-            query = f(*args)
-            cursor.execute(query, args[1:])
-            self._clean_up(cnx, cursor)
-        return query_execute
-
-    def _fetch_query(f):
-        """Decorator to help execuate database fetches
+    def _fetch_query(self, query, *args):
+        """Helper execuate database fetches
             
         Args:
-            f (function): Function that returns an sql query as a string.
+            query (string): Query to execute.
 
         Returns:
-            function: Function that executes the query.
+            list: Fetched data.
         """
-        def query_execute(*args):
-            """Executes database queries
-
-            Args:
-                *args: Variable length parameter list with query information.
-
-            Returns:
-                list: Fetched data.
-                
-            """
-            cnx = args[0]._get_connection()
-            cursor = cnx.cursor()
-            query = f(*args)
-            try:
-                cursor.execute(query, args[1:])
-                result = cursor.fetchall()
-            except connector.error.ProgrammingError as e:
-                return None
-            finally:
-                cursor.close()
-                cnx.close()
-            return result
-        return query_execute
+        cnx = self._get_connection()
+        cursor = cnx.cursor()
+        try:
+            cursor.execute(query, args)
+            result = cursor.fetchall()
+        except connector.errors.ProgrammingError as e:
+            return None
+        finally:
+            cursor.close()
+            cnx.close()
+        return result
 
 
     def create_table(self, server_id, vals):
@@ -128,11 +106,12 @@ class SQLWrapper():
         """
         cnx = self._get_connection()
         cursor = cnx.cursor()
-        query = ("CREATE TABLE %s (id VARCHAR(25) PRIMARY KEY, "
-                    "time INT DEFAULT 0, rank INT DEFAULT 0"
-                    "wl_status BOOLEAN DEFAULT false)")
-        cursor.execute(query, server.id)
-        query = "INSERT INTO %s (id) VALUES (%s)"
+        query = ("CREATE TABLE `%s` (id VARCHAR(25) PRIMARY KEY, "
+                    "time INT DEFAULT 0, rank INT DEFAULT 0, "
+                    "`wl_status` BOOLEAN DEFAULT false)")
+        query = query % (server_id)
+        cursor.execute(query)
+        query = "INSERT INTO `%s` (id) VALUES (%s)" % (server_id, "%s")
         cursor.executemany(query, vals)
         self._clean_up(cnx, cursor)
 
@@ -148,15 +127,15 @@ class SQLWrapper():
         """
         cnx = self._get_connection()
         cursor = cnx.cursor()
-        query = "UPDATE $s SET time=%s, rank=%s WHERE id=%s"
+        query = "UPDATE `%s` SET time=%s, rank=%s WHERE id=%s"
         for member in server_times:
             time = server_times[member][0]
             rank = server_times[member][1]
-            cursor.execute(query, (server_id, time, rank, member))
+            spec_query = query % (server_id, time, rank, "%s")
+            cursor.execute(spec_query, (member,))
         self._clean_up(cnx, cursor)
 
         
-    @_update_query
     def add_user(self, server_id, user_id):
         """Adds user to the specified server's table.
 
@@ -166,14 +145,13 @@ class SQLWrapper():
             user_id (string): Unique identifier for the user whose values are
                     being updated.
 
-        Returns:
-            string: MySQL query that represents this function's use.
 
         """
-        return "INSERT INTO %s VALUES (%s, 0, 0, false)"
+        query = ("INSERT INTO `%s` VALUES (`%s`, 0, 0, false)" 
+                % (server_id, user_id))
+        self._update_query(query)
 
 
-    @_update_query
     def update_user(self, server_id, user_id, time, rank):
         """Updates table values for specified user.
 
@@ -185,13 +163,11 @@ class SQLWrapper():
             time (int): User's total accumulated time.
             rank (int): Integer representation of user's rank.
 
-        Returns:
-            string: MySQL query that represents this function's use.
-
         """
-        return "UPDATE %s SET time=%s, rank=%s WHERE id=%s"
+        query = ("UPDATE `%s` SET time=%s, rank=%s WHERE id=%s" 
+                % (server_id, time, rank, "%s"))
+        self._update_query(query, user_id)
 
-    @_update_query
     def whitelist_user(self, server_id, user_id):
         """Whitelists a specified user by making their whitelist status true.
 
@@ -201,13 +177,10 @@ class SQLWrapper():
             user_id (string): Unique identifier for the user whose values are
                     being updated.
 
-        Returns:
-            string: MySQL query that represents this function's use.
-
         """
-        return "UPDATE %s SET wl_status=true WHERE id=%s"
+        query = "UPDATE `%s` SET wl_status=true WHERE id=%s" % (server_id, "%s")
+        self._update_query(query, user_id)
 
-    @_update_query
     def unwhitelist_user(self, server_id, user_id):
         """UnWhitelists a specified user by making their whitelist status false.
 
@@ -217,13 +190,11 @@ class SQLWrapper():
             user_id (string): Unique identifier for the user whose values are
                     being updated.
 
-        Returns:
-            string: MySQL query that represents this function's use.
-
         """
-        return "UPDATE %s SET wl_status=false WHERE id=%s"
+        query = ("UPDATE `%s` SET wl_status=false WHERE id=%s" 
+                % (server_id, "%s"))
+        self._update_query(query, user_id)
 
-    @_update_query
     def whitelist_all(self, server_id):
         """Whitelists all users.
 
@@ -232,9 +203,9 @@ class SQLWrapper():
                     is being created.
 
         """
-        return "UPDATE %s SET wl_status=true"
+        query = "UPDATE `%s` SET wl_status=true" % server_id
+        self._update_query(query)
 
-    @_update_query
     def unwhitelist_all(self, server_id):
         """Unwhitelists all users.
 
@@ -243,9 +214,9 @@ class SQLWrapper():
                     is being created.
 
         """
-        return "UPDATE %s SET wl_status=false"
+        query = "UPDATE `%s` SET wl_status=false" % server_id
+        self._update_query(query)
 
-    @_fetch_query
     def fetch_user(self, server_id, user_id):
         """Gets a specified user's data.
 
@@ -256,12 +227,12 @@ class SQLWrapper():
                     being updated.
 
         Returns:
-            string: MySQL query that represents this function's use.
+            list: Fetched data
 
         """
-        return "SELECT * FROM %s WHERE id=%s"
+        query = "SELECT * FROM `%s` WHERE id=%s" % (server_id, "%s")
+        return self._fetch_query(query, user_id)
 
-    @_fetch_query
     def fetch_all(self, server_id):
         """Gets all users' data for the specified server.
 
@@ -270,7 +241,8 @@ class SQLWrapper():
                     is being created.
 
         Returns:
-            string: MySQL query that represents this function's use.
+            list: Fetched data
 
         """
-        return "SELECT * FROM %s"
+        query = "SELECT * FROM `%s`" % server_id
+        return self._fetch_query(query)
