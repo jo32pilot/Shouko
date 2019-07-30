@@ -4,6 +4,7 @@ Defines wrapper class for sql python connector.
 """
 
 import logging
+from math import floor
 from mysql import connector
 from mysql.connector.pooling import MySQLConnectionPool
 
@@ -46,7 +47,7 @@ class SQLWrapper():
         """
         try:
             return self._db_pool.get_connection()
-        except PoolError as e:
+        except connector.errors.PoolError as e:
             logger.warning("POOL LIMIT REACHED")
             return connector.connect(**(self._config))
 
@@ -129,7 +130,7 @@ class SQLWrapper():
         cursor = cnx.cursor()
         query = "UPDATE `%s` SET time=%s, rank=%s WHERE id=%s"
         for member in server_times:
-            time = server_times[member][0]
+            time = floor(server_times[member][0])
             rank = server_times[member][1]
             spec_query = query % (server_id, time, rank, "%s")
             cursor.execute(spec_query, (member,))
@@ -147,9 +148,9 @@ class SQLWrapper():
 
 
         """
-        query = ("INSERT INTO `%s` VALUES (`%s`, 0, 0, false)" 
-                % (server_id, user_id))
-        self._update_query(query)
+        query = ("INSERT INTO `%s` VALUES (%s, 0, 0, false)" 
+                % (server_id, "%s"))
+        self._update_query(query, user_id)
 
 
     def update_user(self, server_id, user_id, time, rank):
@@ -165,7 +166,7 @@ class SQLWrapper():
 
         """
         query = ("UPDATE `%s` SET time=%s, rank=%s WHERE id=%s" 
-                % (server_id, time, rank, "%s"))
+                % (server_id, floor(time), rank, "%s"))
         self._update_query(query, user_id)
 
     def whitelist_user(self, server_id, user_id):

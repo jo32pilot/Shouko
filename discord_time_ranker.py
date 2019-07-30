@@ -1667,9 +1667,9 @@ class PeriodicUpdater(threading.Thread):
 
 
     def run(self):
-        """Constantly updates stats.txt files while the main thread is alive."""
+        """Constantly updates database"""
 
-        while threading.main_thread().is_alive():
+        while True:
             for server in bot.servers:
                 sql.update_server(server.id, global_member_times[server.id])
             time.sleep(config["sleep_time"])
