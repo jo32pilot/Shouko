@@ -149,6 +149,7 @@ message_user = True
 #------------EVENTS------------#
 # NOTE: All event function headers are explained in the reference for the 
 # API.
+
 @bot.event
 async def on_ready():
     """Event called when bot begins to run.
@@ -162,7 +163,7 @@ async def on_ready():
         await bot.on_server_join(server)
 
     PeriodicUpdater().start()
-    await bot.change_presence(game=Game(name='#KyoAniStrong | ~help'))
+    await bot.change_presence(game=Game(name='#KyoaniStrong | ~help'))
     logger.info(str(server_configs))
 
 
@@ -1494,7 +1495,6 @@ def clean_up(sig_num, stack_frame):
     """
     for server in active_threads:
         sql.update_server(server, global_member_times[server])
-        logger.info("Updated database for %s", server)
         for member in active_threads[server]:
             if active_threads[server].get(member) != None:
                 active_threads[server][member].bot_in_server = False
@@ -1580,14 +1580,6 @@ class TimeTracker(threading.Thread):
                 self.member.voice.voice_channel is not None and 
                 not self.member.voice.is_afk and self.bot_in_server):
 
-            # For some reason server_wl for curr server doesn't exist sometimes
-            try:
-                curr_wl = server_wl[self.server.id]
-            except KeyError as e:
-                curr_wl = set()
-                server_wl[self.server.id] = curr_wl
-
-
             times[self.member.id][0] = self.member_time + time.time() - now
 
             # Other functions possibly updating some data, so wait for those to
@@ -1597,7 +1589,7 @@ class TimeTracker(threading.Thread):
             self.block_update = False
 
             # If the user is not whitelisted and has reached a time milestone.
-            if (self.member.id not in curr_wl and 
+            if (self.member.id not in server_wl[self.server.id] and 
                     self.rank_time is not None and 
                     self.member_time + time.time() >= self.rank_time + now):
 
@@ -1675,11 +1667,11 @@ class PeriodicUpdater(threading.Thread):
 
 
     def run(self):
-        """Constantly updates database."""
+        """Constantly updates database"""
 
         while True:
             for server in bot.servers:
                 sql.update_server(server.id, global_member_times[server.id])
             time.sleep(config["sleep_time"])
 
-bot.run(config['token'])
+bot.run(config['test_token'])

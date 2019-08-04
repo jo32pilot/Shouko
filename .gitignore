@@ -1,7 +1,14 @@
-*.log
-*.txt
-*.pem
-config.json
-test.py
-*.pem
-nohupDir
+# Ignore everything
+
+*
+
+# Except these
+
+!assets
+!.gitignore
+!LICENSE
+!README.md
+!backup.py
+!discord_time_ranker.py
+!exampleConfig.json
+!sql_wrapper.py
