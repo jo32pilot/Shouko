@@ -129,7 +129,10 @@ class SQLWrapper():
         cnx = self._get_connection()
         cursor = cnx.cursor()
         query = "UPDATE `%s` SET time=%s, rank=%s WHERE id=%s"
-        for member in server_times:
+
+        # Race conditions may change dict size and .keys() returns an iterator.
+        key_list = list(server_times)
+        for member in key_list:
             time = floor(server_times[member][0])
             rank = server_times[member][1]
             spec_query = query % (server_id, time, rank, "%s")
